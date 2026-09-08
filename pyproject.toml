@@ -1,0 +1,17 @@
+[project]
+name = "ai-tools-household-chores"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "django>=4.2,<5",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "ai_tools_household_chores.settings"
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-django",
+]
