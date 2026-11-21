@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Chore, ChoreOccurrence, Member, RotationState
+from .models import Chore, ChoreOccurrence, Member, OccurrenceException, RotationState
 
 
 @admin.register(Member)
@@ -24,3 +24,9 @@ class RotationStateAdmin(admin.ModelAdmin):
 class ChoreOccurrenceAdmin(admin.ModelAdmin):
     list_display = ["date", "chore", "member", "status", "points"]
     list_filter = ["status"]
+
+
+@admin.register(OccurrenceException)
+class OccurrenceExceptionAdmin(admin.ModelAdmin):
+    list_display = ["date", "chore", "is_cancelled", "is_override", "member"]
+    list_filter = ["is_cancelled", "is_override"]

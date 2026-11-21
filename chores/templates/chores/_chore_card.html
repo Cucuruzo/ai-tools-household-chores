@@ -1,17 +1,19 @@
 {% comment %}
   One chore occurrence (#10). Stored cards carry id="occurrence-<pk>" for
-  #5, #12 and #13; projected cards (status "Planned") have no id.
+  #5, #12 and #13; projected cards (status "Planned") carry
+  id="planned-<chore_id>-<YYYY-MM-DD>" (#31) and are followed by their own
+  "Assigned to" form (no wrapper, no Delete, no Done/Skip).
   Stored cards are followed by their Delete confirmation (#5): a plain form
   POST in a <details>, so it opens and closes without a request or JS.
   Then the Done/Skip/Undo form (#12), outside the <article>. A stored card's
   whole block is wrapped in <div class="card-block" id="card-<pk>">, which
   the status form swaps (hx-target), so Delete and the buttons update together.
   A recurring chore's streak (#32) is a <p class="streak"> inside the <article>.
-  With card_only (set only by #13) just the <article> is rendered, so an
+  With card_only (set by #13 and #31) just the <article> is rendered, so an
   assign swap leaves the block's Delete, status and assign forms in place.
 {% endcomment %}
 {% if card.pk and not card_only %}<div class="card-block" id="card-{{ card.pk }}">
-{% endif %}<article class="chore-card"{% if card.pk %} id="occurrence-{{ card.pk }}"{% endif %}>
+{% endif %}<article class="chore-card" id="{% if card.pk %}occurrence-{{ card.pk }}{% else %}planned-{{ card.chore_id }}-{{ card.date|date:'Y-m-d' }}{% endif %}">
   <p class="title">
     <strong><a href="{% url 'chore_edit' card.chore_id %}{{ return_query }}{% if card.pk and card.recurring %}{% if return_query %}&amp;{% else %}?{% endif %}occurrence={{ card.pk }}{% endif %}">{% if card.struck %}<s>{{ card.title }}</s>{% else %}{{ card.title }}{% endif %}</a></strong>
   </p>
@@ -77,3 +79,20 @@
 {% endif %}
 </div>
 {% endif %}
+{% if not card.pk and not card_only %}{% with planned_id=card.chore_id|stringformat:"d"|add:"-"|add:card.date.isoformat %}{% url 'planned_assign' card.chore_id as planned_url %}
+<form class="assign" method="post" action="{{ planned_url }}" hx-post="{{ planned_url }}" hx-trigger="change" hx-target="#planned-{{ planned_id }}" hx-swap="outerHTML">
+  {% csrf_token %}
+  <input type="hidden" name="date" value="{{ card.date|date:'Y-m-d' }}">
+  {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+  {% if filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+  {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+  <label for="assign-planned-{{ planned_id }}">Assigned to</label>
+  <select id="assign-planned-{{ planned_id }}" name="assignee">
+    <option value=""{% if not card.member %} selected{% endif %}>Unassigned</option>
+    {% for m in members %}
+      <option value="{{ m.pk }}"{% if card.member.pk == m.pk %} selected{% endif %}>{{ m.avatar }} {{ m.name }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit">Assign</button></noscript>
+</form>
+{% endwith %}{% endif %}

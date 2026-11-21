@@ -63,7 +63,7 @@ def dates(c, **filters):
 STORED = re.compile(
     r'<article class="chore-card" id="occurrence-(\d+)">.*?</article>\s*'
     r'(?:<details class="delete-confirm">(.*?)</details>)?', re.S)
-PROJECTED_WITH_DELETE = re.compile(r'<article class="chore-card">(?:(?!<article).)*?</article>\s*<details', re.S)
+PROJECTED_WITH_DELETE = re.compile(r'<article class="chore-card"(?: id="planned-\d+-\d{4}-\d{2}-\d{2}")?>(?:(?!<article).)*?</article>\s*<details', re.S)
 DETAILS = re.compile(r'<details class="delete-confirm">(.*?)</details>', re.S)
 
 

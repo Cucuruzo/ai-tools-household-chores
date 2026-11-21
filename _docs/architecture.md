@@ -129,6 +129,27 @@ Overdue is **derived**: status is `todo` and date/time is in the past.
 Rows are created lazily by the first turn. Only `services.advance_rotation`
 writes `last_member`; `services.next_member` is read-only (used by projection).
 
+### OccurrenceException
+
+A per-date change to a **projected** (not yet stored) occurrence (#31). It is
+applied when projecting and used up when the week is materialized. #22 (delete
+a projected date) reuses it, and #38 can add nullable `due_time` / `points`
+columns later.
+
+| Field        | Type                                         |
+|--------------|----------------------------------------------|
+| id           | AutoField (PK)                               |
+| chore        | ForeignKey(Chore, on_delete=CASCADE, related_name="exceptions") |
+| date         | DateField                                    |
+| is_cancelled | BooleanField (default False): the date is not shown, and is stored with `is_cancelled=True` when the week is materialized |
+| is_override  | BooleanField (default False): `member` replaces the projected member |
+| member       | ForeignKey(Member, nullable, on_delete=SET_NULL): None means Unassigned, so deleting the member leaves an override to Unassigned |
+
+**Unique constraint:** (chore, date), `unique_exception_per_chore_date`
+
+A stored row on the same date always wins. An exception on a date that is not
+on the chore's rule is ignored.
+
 ### ChoreTemplate
 
 Built-in and custom household chore templates, stored as `Chore` records with
@@ -159,6 +180,10 @@ migration. The three rules:
 4. `unassigned` chores get no member until manually assigned.
 5. Manual reassignment on a single occurrence does not affect `RotationState`.
 6. If no eligible members exist, the occurrence stays unassigned.
+7. A date cancelled or reassigned in advance (`OccurrenceException`, #31)
+   still takes its turn. `RotationState.last_member` becomes that date's
+   **rotation** member, never the override member, and no other date's member
+   changes.
 
 ## Occurrence Projection Strategy
 
@@ -169,6 +194,18 @@ migration. The three rules:
   occurrences for that week are **materialized** as `ChoreOccurrence` records.
 - Already-materialized occurrences are never overwritten (preserving manual edits).
 - Viewing a future week shows projected data; only the current week materializes.
+- `OccurrenceException` rows are **applied on read**. Projection loads them in
+  one query bounded to `[max(start, current Monday), end]`. A cancelled date
+  is left out, and an override date gets the exception's member and
+  `is_override=True` (a key on every projected dict). Window and turn counting
+  do not change, so the query count stays constant.
+- They are **consumed at materialization**: `materialize_week` stores an
+  override as a row with that member and `is_override=True`, and a cancelled
+  date as a row with `is_cancelled=True`. Each one still calls
+  `advance_rotation`. Then every exception dated on or before that Sunday is
+  deleted in the same transaction.
+- `services.projected_occurrence(chore, day, today)` is the only way views
+  decide "D is a projected date of this chore".
 
 ## Edit scope (#20)
 
@@ -234,6 +271,7 @@ scope. One-off chores ignore `scope` and `occurrence` and save in place
 /dashboard/?member=<id>            GET    filtered by member
 /dashboard/toggle/<id>/            POST   mark done / undo / skip
 /dashboard/assign/<id>/            POST   assign or reassign occurrence
+/dashboard/assign/planned/<id>/    POST   assign a projected date of chore <id> (fields `date`, `assignee`; #31)
 
 /calendar/                         GET    monthly calendar (default: this month)
 /calendar/?month=2026-09           GET    calendar for a specific month
@@ -329,6 +367,7 @@ a "+" link opens chore creation with that date pre-filled (`?date=YYYY-MM-DD`).
 | Navigate week           | Click < or >     | `hx-get`               | `_dashboard_list.html` |
 | Filter by member/day    | Change dropdown  | `hx-get`               | `_dashboard_list.html` |
 | Assign/reassign         | Change dropdown  | `hx-post` (field `assignee`) | `#occurrence-<pk>` (`_chore_card.html` with `card_only`); on a member-filter mismatch `HX-Retarget: #dashboard-list` + `_dashboard_list.html` |
+| Assign a projected date | Change dropdown  | `hx-post` (fields `date`, `assignee`) | `#planned-<chore>-<YYYY-MM-DD>` (`_chore_card.html` with `card_only`); on a member-filter mismatch `HX-Retarget: #dashboard-list` + `_dashboard_list.html` |
 | Navigate month          | Click < or >     | `hx-get`               | `_calendar_grid.html`  |
 | Add/edit/remove member  | Submit form      | `hx-post`              | `_member_row.html`     |
 | Pick template           | Click template   | `hx-get`               | pre-fills chore form   |

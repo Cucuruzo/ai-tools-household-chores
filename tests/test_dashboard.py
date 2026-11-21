@@ -85,7 +85,7 @@ def occ(title, day, status="todo", due=None, member=None, points=10, mode="unass
 # --- Parsing the page ---------------------------------------------------------------
 
 SECTION = re.compile(r'<section id="section-([a-z-]+)">(.*?)</section>', re.S)
-CARD = re.compile(r'<article class="chore-card"(?: id="occurrence-(\d+)")?>(.*?)</article>', re.S)
+CARD = re.compile(r'<article class="chore-card"(?: id="(?:occurrence-(\d+)|planned-\d+-\d{4}-\d{2}-\d{2})")?>(.*?)</article>', re.S)
 MAIN = re.compile(r'<main class="container">(.*?)</main>', re.S)
 TITLE = re.compile(r'<h1 id="week-title">(.*?)</h1>', re.S)
 

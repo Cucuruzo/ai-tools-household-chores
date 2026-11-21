@@ -20,7 +20,8 @@ from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
 from .services import (
     ASSIGNMENT_FIELDS, RULE_FIELDS, apply_future_edit, eligible_pool, materialize_one_off,
-    materialize_week, project_occurrences, set_occurrence_status, update_occurrence,
+    materialize_week, project_occurrences, projected_occurrence, set_occurrence_status,
+    set_projected_member, update_occurrence,
 )
 
 
@@ -82,7 +83,7 @@ def _projected_cards(projected, pools):
         cards.append(dash.Card(
             pk=None, chore_id=p["chore_id"], title=p["title"], date=p["date"],
             due_time=p["due_time"], points=p["points"], status=dash.PLANNED, member=member,
-            assignee_note=_note(pools, chores[p["chore_id"]], p["assignment_mode"], member, False),
+            assignee_note=_note(pools, chores[p["chore_id"]], p["assignment_mode"], member, p["is_override"]),
         ))
     return cards
 
@@ -792,3 +793,70 @@ def occurrence_assign(request, pk):
             if current.status != ChoreOccurrence.Status.TODO:
                 return HttpResponseBadRequest("Undo first")
     return _assign_response(request, pk)
+
+
+# --- Assign a projected date (#31) -------------------------------------------------
+
+
+def _parse_assignee(raw):
+    """``(member_id or None, error)`` for the posted ``assignee`` (as #13)."""
+    if raw is None:
+        return None, "Choose who to assign"
+    if raw == "":
+        return None, None
+    member_id = _parse_pk(raw)
+    if member_id is None or not Member.objects.filter(pk=member_id).exists():
+        return None, "Unknown member"
+    return member_id, None
+
+
+def _planned_assign_response(request, chore, day, today, now):
+    """The rebuilt Planned card, the re-rendered list when a member filter now
+    hides it, or (no JavaScript) the 302 back to the same view."""
+    if not _is_htmx(request):
+        return _dashboard_redirect(request.POST)
+    p = projected_occurrence(chore, day, today)
+    if p is None:  # gone after the write
+        raise Http404("No such date")
+    [card] = _projected_cards([p], _PoolCache())
+    monday, member, day_filter = _dashboard_filters(request.POST)
+    monday = monday or dash.monday_of(today)
+    if member is None or dash.filter_cards([card], monday, member, None):
+        context = {"card": card, "card_only": True}
+        context.update(_filter_context(dash.week_nav(monday, today), member, day_filter))
+        return render(request, "chores/_chore_card.html", context)
+    context = _dashboard_context(monday, today, now, member, day_filter)
+    context.update(_filter_context(context["nav"], member, day_filter))
+    response = render(request, "chores/_dashboard_list.html", context)
+    response["HX-Retarget"] = "#dashboard-list"
+    response["HX-Reswap"] = "outerHTML"
+    return response
+
+
+@require_POST
+def planned_assign(request, chore_id):
+    """Assign one projected date D of a chore before its week is stored.
+
+    Writes only the ``(chore, D)`` exception (``is_override=True``); never a
+    ChoreOccurrence or RotationState. D must be a projected date of the chore
+    for the viewer's ``today`` (#26), checked in the same transaction as the
+    write.
+    """
+    if not is_valid_pk(chore_id):  # out-of-range ids would overflow the DB query
+        raise Http404("No such chore")
+    now = timezone.localtime()  # one clock read, viewer's zone (#26)
+    today = timezone.localdate(now)
+    with transaction.atomic():
+        chore = get_object_or_404(Chore.objects.select_for_update(), pk=chore_id, is_template=False)
+        day = month.parse_date(request.POST.get("date"))
+        if day is None:
+            return HttpResponseBadRequest("Invalid date")
+        member_id, error = _parse_assignee(request.POST.get("assignee"))
+        if error:
+            return HttpResponseBadRequest(error)
+        projected = projected_occurrence(chore, day, today)
+        if projected is None:
+            raise Http404("Not a planned date of this chore")
+        if projected["member_id"] != member_id:
+            set_projected_member(chore, day, member_id)
+    return _planned_assign_response(request, chore, day, today, now)

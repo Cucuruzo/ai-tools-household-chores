@@ -11,7 +11,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from .models import Chore, ChoreOccurrence, Member, RotationState
+from .models import Chore, ChoreOccurrence, Member, OccurrenceException, RotationState
 
 ONE_DAY = datetime.timedelta(days=1)
 
@@ -209,6 +209,11 @@ def _first_turn_index(pool, last, current_order):
 def project_occurrences(start, end, today=None):
     """Occurrences that would happen in [start, end], without writing anything.
 
+    Per-date exceptions (#31) are applied on read: a cancelled date is not
+    returned, an override date gets the exception's member (None for
+    Unassigned) and ``is_override=True``. Both still take their rotation
+    turn, so the members of every other date are unchanged.
+
     Dates with a stored occurrence, and anything before a chore's window
     start, are never returned. Rotating chores simulate the turns that
     ``next_member`` would give from ``RotationState.last_member``, one turn
@@ -219,9 +224,26 @@ def project_occurrences(start, end, today=None):
     are counted, not walked. The query count does not depend on the range
     (#30).
     """
+    return _project(start, end, _resolve_today(today), with_cancelled=False)
+
+
+def _exceptions_in(first, end):
+    """``{(chore_id, date): (is_cancelled, is_override, member_id)}`` for
+    every exception dated in [first, end]: one query, whatever the range."""
+    if end < first:
+        return {}
+    rows = OccurrenceException.objects.filter(date__gte=first, date__lte=end).values_list(
+        "chore_id", "date", "is_cancelled", "is_override", "member_id"
+    )
+    return {(chore_id, day): rest for chore_id, day, *rest in rows}
+
+
+def _project(start, end, today, with_cancelled):
+    """``project_occurrences`` for a resolved ``today``. With
+    ``with_cancelled`` (materialization only), cancelled dates are returned
+    too, with their rotation member, and every dict gets ``is_cancelled``."""
     if end < start:
         return []
-    today = _resolve_today(today)
 
     latest = dict(
         ChoreOccurrence.objects.values("chore_id")
@@ -235,6 +257,9 @@ def project_occurrences(start, end, today=None):
     members = list(Member.objects.order_by("order", "id"))
     pools = _rotation_pools(members)
     current_order = {m.pk: m.order for m in members}
+    # Exceptions only matter on dates that can be returned; turns before
+    # ``start`` are counted, and an exception never changes the count.
+    exceptions = _exceptions_in(max(start, _monday_of(today)), end)
 
     results = []
     for chore in Chore.objects.filter(is_template=False):
@@ -263,7 +288,15 @@ def project_occurrences(start, end, today=None):
                 turn += 1
             else:
                 member_id = None
-            results.append({
+            # The turn above is taken whatever the exception says (rule 7).
+            is_cancelled, is_override, override_member_id = exceptions.get(
+                (chore.pk, day), (False, False, None)
+            )
+            if is_cancelled and not with_cancelled:
+                continue
+            if is_override and not is_cancelled:
+                member_id = override_member_id
+            occurrence = {
                 "chore_id": chore.pk,
                 "title": chore.title,
                 "date": day,
@@ -271,32 +304,73 @@ def project_occurrences(start, end, today=None):
                 "member_id": member_id,
                 "points": chore.points,
                 "assignment_mode": chore.assignment_mode,
-            })
+                "is_override": bool(is_override and not is_cancelled),
+            }
+            if with_cancelled:
+                occurrence["is_cancelled"] = bool(is_cancelled)
+            results.append(occurrence)
     results.sort(key=lambda o: (o["date"], o["title"], o["chore_id"]))
     return results
+
+
+def projected_occurrence(chore, day, today):
+    """The dict ``project_occurrences(day, day, today)`` gives for ``chore``
+    on ``day``, or None when ``day`` is not a projected date of it (stored,
+    off the rule, outside the window, a template, or cancelled in advance).
+    Constant query count."""
+    return next(
+        (o for o in project_occurrences(day, day, today=today) if o["chore_id"] == chore.pk),
+        None,
+    )
+
+
+def set_projected_member(chore, day, member_id):
+    """Override the member of projected date ``day`` (#31): create or update
+    the one ``(chore, day)`` exception with ``is_override=True`` and
+    ``member_id`` (None for Unassigned). Writes nothing else. A concurrent
+    insert that hits the unique constraint is retried once, as an update."""
+    for attempt in range(2):
+        try:
+            with transaction.atomic():
+                OccurrenceException.objects.update_or_create(
+                    chore=chore, date=day,
+                    defaults={"is_override": True, "member_id": member_id},
+                )
+            return
+        except IntegrityError:
+            if attempt:
+                raise
 
 
 # --- Materialization (#9) ----------------------------------------------------
 
 
-def create_occurrence(chore, day):
+_ROTATION_MEMBER = object()
+
+
+def create_occurrence(chore, day, override_member_id=_ROTATION_MEMBER, is_cancelled=False):
     """Store one occurrence of ``chore`` on ``day`` with the right member.
 
     The member comes from ``advance_rotation``, which takes (and stores) one
     rotation turn for rotating chores and returns the fixed assignee or None
     otherwise. ``due_time`` and ``points`` are copied from the chore now.
+    An exception (#31) still takes that turn: ``override_member_id`` (a pk
+    or None) replaces the member and sets ``is_override``; ``is_cancelled``
+    stores the row cancelled, with the rotation member.
     Raises ``IntegrityError`` if ``(chore, day)`` is already stored; the
     caller's ``atomic`` block then also rolls back the turn.
     """
     member = advance_rotation(chore)
+    override = override_member_id is not _ROTATION_MEMBER
     return ChoreOccurrence.objects.create(
         chore=chore,
         date=day,
-        member=member,
+        member_id=override_member_id if override else getattr(member, "pk", None),
         due_time=chore.due_time,
         points=chore.points,
         status=ChoreOccurrence.Status.TODO,
-        is_override=False,
+        is_override=override,
+        is_cancelled=is_cancelled,
     )
 
 
@@ -315,14 +389,35 @@ def materialize_one_off(chore, today):
 
 
 def _materialize_attempt(week_start, today):
+    sunday = week_start + 6 * ONE_DAY
     with transaction.atomic():
-        projected = project_occurrences(week_start, week_start + 6 * ONE_DAY, today=today)
+        projected = project_occurrences(week_start, sunday, today=today)
+        # Dates cancelled in advance are hidden from projection but are still
+        # stored (cancelled) and still take their turn.
+        if OccurrenceException.objects.filter(
+            date__gte=week_start, date__lte=sunday, is_cancelled=True
+        ).exists():
+            projected += [
+                o for o in _project(week_start, sunday, today, with_cancelled=True)
+                if o["is_cancelled"]
+            ]
+            projected.sort(key=lambda o: (o["date"], o["title"], o["chore_id"]))
         chores = Chore.objects.select_related("assigned_to").in_bulk(
             {o["chore_id"] for o in projected}
         )
-        # Projection is sorted by date first, so each rotating chore takes
-        # its turns in date order.
-        return [create_occurrence(chores[o["chore_id"]], o["date"]) for o in projected]
+        # Sorted by date first, so each rotating chore takes its turns in
+        # date order. Exceptions are applied, then consumed.
+        created = []
+        for o in projected:
+            chore = chores[o["chore_id"]]
+            if o.get("is_cancelled"):
+                created.append(create_occurrence(chore, o["date"], is_cancelled=True))
+            elif o.get("is_override"):
+                created.append(create_occurrence(chore, o["date"], override_member_id=o["member_id"]))
+            else:
+                created.append(create_occurrence(chore, o["date"]))
+        OccurrenceException.objects.filter(date__lte=sunday).delete()
+        return created
 
 
 def materialize_week(week_start, today=None):
@@ -330,7 +425,9 @@ def materialize_week(week_start, today=None):
 
     Only the current week (the Monday of ``today``'s week) may be
     materialized. Existing rows are never touched: projection already skips
-    them. A concurrent run that stores a row first makes an insert hit the
+    them. Exceptions of the week (#31) are stored as override or cancelled
+    rows, each taking its rotation turn, and every exception dated on or
+    before that Sunday is deleted in the same transaction. A concurrent run that stores a row first makes an insert hit the
     unique ``(chore, date)`` constraint; the attempt is rolled back (rotation
     turns included) and retried once from a fresh projection.
     """

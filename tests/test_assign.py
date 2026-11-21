@@ -260,11 +260,16 @@ def test_every_stored_todo_card_has_the_form_after_status_inside_wrapper(client,
 def test_past_week_projected_and_planned_cards(client, week_of_cards):
     past = once("Past", day="2026-11-10")
     assert form_of(blocks(page(client, "2026-W46"))[past.pk]) is not None
-    weekly("Planned", start="2026-11-04")
+    planned = weekly("Planned", start="2026-11-04")
     body = page(client, "2026-W48")
-    assert 'class="assign"' not in body
-    assert 'name="assignee"' not in body
+    # W48 has no stored card, so no #13 (occurrence_assign) form ...
+    assert not re.search(r'action="/dashboard/assign/\d+/"', body)
     assert "occurrence_assign" not in body
+    # ... but its Planned card has the #31 (planned_assign) form.
+    [(attrs, inner)] = ASSIGN_FORM.findall(body)
+    assert f'action="/dashboard/assign/planned/{planned.pk}/"' in attrs
+    assert '<input type="hidden" name="date" value="2026-11-25">' in inner
+    assert f'<select id="assign-planned-{planned.pk}-2026-11-25" name="assignee">' in inner
 
 
 @pytest.mark.django_db

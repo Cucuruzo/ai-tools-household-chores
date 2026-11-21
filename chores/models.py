@@ -128,3 +128,30 @@ class RotationState(models.Model):
 
     def __str__(self):
         return f"{self.chore} → {self.last_member or '—'}"
+
+
+class OccurrenceException(models.Model):
+    """A per-date change to a projected (not yet stored) occurrence (#31).
+
+    Applied on read by projection and consumed by ``materialize_week``. A
+    stored row on the same date always wins; an exception on a date that is
+    not on the chore's rule is ignored. Either kind still takes its rotation
+    turn (rotation rule 7).
+    """
+
+    chore = models.ForeignKey(Chore, on_delete=models.CASCADE, related_name="exceptions")
+    date = models.DateField()
+    is_cancelled = models.BooleanField(default=False)
+    # ``member`` replaces the projected member (None: Unassigned).
+    is_override = models.BooleanField(default=False)
+    member = models.ForeignKey(
+        Member, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["chore", "date"], name="unique_exception_per_chore_date"),
+        ]
+
+    def __str__(self):
+        return f"{self.chore} on {self.date} (exception)"
