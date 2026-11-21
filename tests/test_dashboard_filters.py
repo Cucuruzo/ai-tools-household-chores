@@ -430,7 +430,9 @@ def test_partial_full_and_history_restore(client, week):
     partial = page(client, data=data, **HTMX)
     restore = page(client, data=data, **HTMX, HTTP_HX_HISTORY_RESTORE_REQUEST="true")
     assert "<html" in full and "<html" in restore
-    assert "<html" not in partial and "profile-switcher" not in partial
+    assert "<html" not in partial
+    assert partial.count('<nav id="profile-switcher" hx-swap-oob="true"') == 1
+    assert partial.rindex("</div>") < partial.index('id="profile-switcher"')
     assert 'id="dashboard-filters"' in partial and 'id="week-title"' in partial
     assert 'aria-label="Next week"' in partial
     expected = [("MonMom", "overdue")]

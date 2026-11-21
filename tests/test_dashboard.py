@@ -487,7 +487,9 @@ def test_htmx_request_returns_partial(client):
     response = get(client, "2026-W48", HTTP_HX_REQUEST="true")
     body = response.content.decode()
     assert "<html" not in body
-    assert "profile-switcher" not in body
+    assert body.count('id="profile-switcher"') == 1
+    assert body.count('<nav id="profile-switcher" hx-swap-oob="true"') == 1
+    assert body.rindex("</div>") < body.index('id="profile-switcher"')
     assert "<script" not in body
     assert body.strip().startswith('<div id="dashboard-list">')
     assert week_title(body) == "Nov 23 – 29, 2026"
@@ -500,7 +502,8 @@ def test_htmx_partial_equals_full_page_list(client):
     occ("Today job", "2026-11-18")
     partial = page(client, HTTP_HX_REQUEST="true")
     full = page(client)
-    assert blank_csrf(partial).strip() == main(full).strip()
+    oob = re.compile(r'<nav id="profile-switcher" hx-swap-oob="true".*?</nav>', re.S)
+    assert blank_csrf(oob.sub("", partial)).strip() == main(full).strip()
 
 
 @pytest.mark.django_db

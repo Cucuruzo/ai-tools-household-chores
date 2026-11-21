@@ -713,7 +713,9 @@ def test_htmx_returns_partial_only(client):
     response = get(client, "2026-12", HTTP_HX_REQUEST="true")
     body = response.content.decode()
     assert response.status_code == 200
-    assert "<html" not in body and "profile-switcher" not in body
+    assert "<html" not in body
+    assert body.count('<nav id="profile-switcher" hx-swap-oob="true"') == 1
+    assert body.rindex("</section>") < body.index('id="profile-switcher"')
     assert body.count('<section id="calendar-grid">') == 1
     assert "December 2026" in body and "<table>" in body
     assert link(body, "Previous month") and link(body, "Next month")
