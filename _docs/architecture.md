@@ -201,6 +201,8 @@ are never scheduled directly.
 /contribution/?period=month        GET    this month's contribution
 
 /history/                          GET    history view (completed + skipped)
+/history/?member=<id>              GET    filtered by assignee or credited member
+/history/?page=<n>                 GET    50 per page
 ```
 
 ## Screen Layouts

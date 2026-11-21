@@ -1,0 +1,45 @@
+{% extends "chores/base.html" %}
+{% block title %}History · Household Chores{% endblock %}
+{% block content %}
+<h1>History</h1>
+<form method="get" action="{% url 'history' %}">
+  <label for="history-member">Member</label>
+  <select id="history-member" name="member">
+    <option value=""{% if filter_member == "" %} selected{% endif %}>Everyone</option>
+    {% for m in members %}
+      <option value="{{ m.pk }}"{% if filter_member == m.pk %} selected{% endif %}>{{ m.name }}</option>
+    {% endfor %}
+    <option value="unassigned"{% if filter_member == "unassigned" %} selected{% endif %}>Unassigned</option>
+  </select>
+  <button type="submit">Show</button>
+</form>
+{% if never_any %}
+  <p>No completed or skipped chores yet</p>
+{% elif not groups %}
+  <p>Nothing here</p>
+{% else %}
+  {% for day, items in groups %}
+    <h2><time datetime="{{ day|date:'Y-m-d' }}">{{ day|date:'D j M Y' }}</time></h2>
+    <ul>
+      {% for o in items %}
+        <li class="history-row" id="history-{{ o.pk }}">
+          <strong class="title">{{ o.chore.title }}</strong>
+          <span class="status">{% if o.status == "done" %}Done{% else %}Skipped{% endif %}</span>
+          <span class="points">{% if o.status == "done" %}{{ o.points }} pts{% else %}—{% endif %}</span>
+          {% if o.member %}<span class="assignee">Assigned to <span class="avatar">{{ o.member.avatar }}</span> <span class="name">{{ o.member.name }}</span></span>{% else %}<span class="assignee">Unassigned</span>{% endif %}
+          {% if o.status == "done" %}
+            <p class="credit">{% if o.completed_by %}Done by <span class="avatar">{{ o.completed_by.avatar }}</span> <span class="name">{{ o.completed_by.name }}</span>{% else %}Done · not credited{% endif %}{% if o.done_at %} · <time datetime="{{ o.done_at|date:'c' }}">{{ o.done_at|date:'D j M, H:i' }}</time>{% endif %}</p>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endfor %}
+{% endif %}
+{% if paginator.num_pages > 1 %}
+  <nav aria-label="History pages">
+    {% if newer_url %}<a href="{{ newer_url }}">Newer</a>{% endif %}
+    <span>Page {{ page.number }} of {{ paginator.num_pages }}</span>
+    {% if older_url %}<a href="{{ older_url }}">Older</a>{% endif %}
+  </nav>
+{% endif %}
+{% endblock %}
