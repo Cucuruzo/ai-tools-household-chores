@@ -439,8 +439,44 @@ def profile_switch(request, pk):
     return redirect(target)
 
 
-def _chore_form_page(request, form, chore=None, start_date=None, filters=None, scope=None):
+def _edit_url(pk, filters, occurrence=None):
+    """The edit page's URL with #27's query, plus ``occurrence=`` when given."""
+    url = reverse("chore_edit", args=[pk])
+    if filters is not None:
+        monday, member, day = filters
+        url += dash.dashboard_query(dash.week_param(monday) if monday else None, member, day)
+    if occurrence is not None:
+        url += ("&" if "?" in url else "?") + f"occurrence={occurrence.pk}"
+    return url
+
+
+def _create_url(start_date, template, recurrence, filters):
+    """The create page's canonical URL from normalized values only (#34)."""
+    parts = []
+    if start_date:
+        parts.append(f"date={start_date.isoformat()}")
+    if template:
+        parts.append(f"template={template.pk}")
+    elif recurrence:  # a template page ignores recurrence
+        parts.append(f"recurrence={recurrence}")
+    if filters is not None:
+        monday, member, day = filters
+        parts.append("return_to=dashboard")
+        query = dash.dashboard_query(dash.week_param(monday) if monday else None, member, day)
+        if query:
+            parts.append(query[1:])
+    url = reverse("chore_create")
+    return url + "?" + "&".join(parts) if parts else url
+
+
+def _chore_form_page(request, form, chore=None, start_date=None, filters=None, scope=None,
+                     template=None, recurrence=None):
     context = {"form": form, "chore": chore, "prefill_date": start_date}
+    if chore is None:
+        context["switcher_next"] = _create_url(start_date, template, recurrence, filters)
+    else:
+        occurrence = scope.get("scope_occurrence") if scope else None
+        context["switcher_next"] = _edit_url(chore.pk, filters, occurrence)
     if scope is not None:  # a recurring chore's edit scope (#20)
         context.update(scope)
     if filters is not None:  # normalized (monday, member, day) from the dashboard (#27)
@@ -468,13 +504,7 @@ def _chore_form_page(request, form, chore=None, start_date=None, filters=None, s
 
 def _edit_redirect(pk, filters, occurrence=None):
     """302 to the edit page with #27's query, plus ``occurrence=`` when given."""
-    url = reverse("chore_edit", args=[pk])
-    if filters is not None:
-        monday, member, day = filters
-        url += dash.dashboard_query(dash.week_param(monday) if monday else None, member, day)
-    if occurrence is not None:
-        url += ("&" if "?" in url else "?") + f"occurrence={occurrence.pk}"
-    return redirect(url)
+    return redirect(_edit_url(pk, filters, occurrence))
 
 
 def _save_chore(request, form, chore=None, filters=None, scope=None):
@@ -582,11 +612,14 @@ def chore_create(request):
     recurrence = request.GET.get("recurrence")
     if recurrence in Chore.Recurrence.values:
         initial["recurrence"] = recurrence
+    else:
+        recurrence = None
     if template:
         form = ChoreForm.from_template(template, start_date)
     else:
         form = ChoreForm(initial=initial)
-    return _chore_form_page(request, form, start_date=start_date, filters=filters)
+    return _chore_form_page(request, form, start_date=start_date, filters=filters,
+                            template=template, recurrence=recurrence)
 
 
 @require_http_methods(["GET", "POST"])
@@ -736,21 +769,40 @@ def _toggle_allowed_from(action):
     return (ChoreOccurrence.Status.TODO,)
 
 
-def _toggle_success(request, pk):
-    """The swapped card block for HTMX, else the 302 back to the same view."""
+def _toggle_success(request, pk, chore_id):
+    """The swapped card block for HTMX, else the 302 back to the same view.
+
+    The block is followed by one out-of-band ``<article>`` (``card_only`` and
+    ``card_oob`` in ``_chore_card.html``) for each other stored card of the
+    chore that the posted dashboard view shows (#37), so a new streak reaches
+    them without a reload. Planned cards never show a streak and are skipped.
+    """
     if not _is_htmx(request):
         return _dashboard_redirect(request.POST)
     now = timezone.localtime()  # one clock read, viewer's zone (#26)
     today = timezone.localdate(now)
-    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache(), today=today)
-    if not cards:  # removed after the write
-        raise Http404("No such occurrence")
-    [card] = cards
-    card.overdue = dash.is_overdue(card, today, now)
     monday, member, day = _dashboard_filters(request.POST)
+    nav = dash.week_nav(monday or dash.monday_of(today), today)
+    visible = Q(date__gte=nav["monday"], date__lte=nav["sunday"])
+    if nav["is_current"]:
+        visible |= Q(status=ChoreOccurrence.Status.TODO, date__lt=nav["monday"])
+    rows = _shown_occurrences().filter(Q(pk=pk) | (Q(chore_id=chore_id) & visible))
+    cards = _stored_cards(rows, _PoolCache(), today=today)
+    for card in cards:
+        card.overdue = dash.is_overdue(card, today, now)
+    card = next((c for c in cards if c.pk == pk), None)
+    if card is None:  # removed after the write
+        raise Http404("No such occurrence")
+    siblings = dash.filter_cards([c for c in cards if c.pk != pk], nav["monday"], member, day)
     context = {"card": card}
-    context.update(_filter_context(dash.week_nav(monday or dash.monday_of(today), today), member, day))
-    return render(request, "chores/_chore_card.html", context)
+    context.update(_filter_context(nav, member, day))
+    response = render(request, "chores/_chore_card.html", context)
+    for sibling in sorted(siblings, key=dash.list_key):
+        response.content += render_to_string(
+            "chores/_chore_card.html",
+            {**context, "card": sibling, "card_only": True, "card_oob": True},
+        ).encode()
+    return response
 
 
 @require_POST
@@ -763,7 +815,7 @@ def occurrence_toggle(request, pk):
         return HttpResponseBadRequest("Unknown action")
     target = _TOGGLE_TARGET[action]
     if occurrence.status == target:
-        return _toggle_success(request, pk)  # repeat: nothing to write
+        return _toggle_success(request, pk, occurrence.chore_id)  # repeat: nothing to write
     if occurrence.status not in _toggle_allowed_from(action):
         return HttpResponseBadRequest("Undo first")
     credited = get_active_member(request) if action == "done" else None
@@ -774,7 +826,7 @@ def occurrence_toggle(request, pk):
             raise Http404("No such occurrence")
         if current.status != target:
             return HttpResponseBadRequest("Undo first")
-    return _toggle_success(request, pk)
+    return _toggle_success(request, pk, occurrence.chore_id)
 
 
 # --- Assign / reassign (#13) -------------------------------------------------------

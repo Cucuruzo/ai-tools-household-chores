@@ -3,6 +3,7 @@ from django.db import transaction
 from django.db.models.functions import Lower
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import TemplateForm
@@ -21,7 +22,9 @@ def _render_list(request):
     templates = Chore.objects.filter(is_template=True, is_builtin=False).order_by(
         Lower("title"), "id"
     )
-    return render(request, "chores/template_list.html", {"templates": templates})
+    return render(
+        request, "chores/template_list.html", {"templates": templates, "switcher_next": reverse("template_list")}
+    )
 
 
 @require_GET
