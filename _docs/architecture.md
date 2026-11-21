@@ -518,7 +518,8 @@ the chore row still exists after the delete:
 /                                  GET    redirect to dashboard
 /dashboard/                        GET    weekly dashboard (default: this week)
 /dashboard/?week=2026-W37          GET    dashboard for a specific week
-/dashboard/?member=<id>            GET    filtered by member
+/dashboard/?member=<id>            GET    filtered by member (also `unassigned`); overrides the header selection
+/dashboard/?member=all             GET    everyone, overriding the header selection (#55)
 /dashboard/toggle/<id>/            POST   mark done / undo / skip
 /dashboard/assign/<id>/            POST   assign or reassign occurrence
 /dashboard/assign/planned/<id>/    POST   assign a projected date of chore <id> (fields `date`, `assignee`; #31)
@@ -558,7 +559,7 @@ the chore row still exists after the delete:
 /family/<id>/move/?dir=up|down     POST   move member up/down in rotation order
 /family/<id>/delete/               POST   remove member
 
-/profile/<id>/                     POST   select the member, or deselect when already active
+/profile/<id>/                     POST   toggle the member in the header selection (#55)
 
 /progress/                         GET    streaks and badges
 /contribution/                     GET    contribution / progress view
@@ -569,6 +570,23 @@ the chore row still exists after the delete:
 /history/?member=<id>              GET    filtered by assignee or credited member
 /history/?page=<n>                 GET    50 per page
 ```
+
+### Header selection (#55)
+
+- Session key `active_member_ids`: member pks in click order, at most 50
+  (`profile.MAX_SELECTED`). A legacy `active_member_id` is migrated into it
+  on the next read (when both are present, the list wins). Invalid,
+  duplicate and deleted entries are dropped as the session is read.
+- Credit: Done credits the selected member only when exactly one is
+  selected; with none or several it is "not credited" (`#selection-hint`
+  in the header says so).
+- Filter precedence on the dashboard: an explicit `?member=` (a pk,
+  `unassigned` or `all`) wins; without one (absent, empty or invalid) the
+  selection applies and unassigned chores are hidden, with a
+  `#header-filter` note. `member=all` shows everyone and is kept in every
+  dashboard link once chosen. The calendar always applies the selection
+  (it has no member filter); history maps `?member=all` to no filter.
+  Contribution and progress stay family-wide.
 
 ## Screen Layouts
 

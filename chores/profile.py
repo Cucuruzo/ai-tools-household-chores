@@ -64,14 +64,10 @@ def get_selected_members(request):
         return list(cached[1])
     has_legacy = LEGACY_KEY in session
     legacy = session.pop(LEGACY_KEY, None)
-    if SESSION_KEY in session:
-        raw = session[SESSION_KEY]
-    elif has_legacy:
-        raw = [legacy]
-    else:
-        raw = None
+    present = SESSION_KEY in session or has_legacy
+    raw = session[SESSION_KEY] if SESSION_KEY in session else [legacy]
     members = []
-    if raw is not None:
+    if present:
         ids = []
         if type(raw) is list:
             for entry in raw:

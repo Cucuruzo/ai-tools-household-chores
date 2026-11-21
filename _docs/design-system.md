@@ -31,6 +31,8 @@ Every visible button, `[role="button"]` (including `summary` and `a`), select an
 
 Every full page: `<header class="container">` holds the clock, then `#profile-switcher`, then `<nav id="site-nav" aria-label="Main">`. The nav comes after the switcher. Links, in order: Dashboard, Calendar, Family, Contribution, Progress, History, Templates. `aria-current="page"` follows `href` and is chosen by `request.resolver_match.url_name` (Family covers `member_*`, Templates covers `template_*`; create and edit pages mark nothing). The current link is bold, `--pico-primary`, with a 3px underline bar. The nav has no `hx-*` attributes and is not in HTMX partials. At 375px it wraps to at most 2 rows; from 768px it is one row.
 
+`#profile-switcher` (#55): each member is a plain POST form that toggles them in the selection. Every selected member's button is `class="profile active" aria-pressed="true"` with a bold name, so several can be highlighted at once; "Who are you?" shows only when nobody is selected. With 2 or more selected, a last `<li id="selection-hint">` says Done is not credited. When the selection filters the dashboard or calendar, `<p id="header-filter">Showing chores of Ann, Bob · chosen in the header</p>` follows the dashboard filters or sits before the calendar's empty state.
+
 ## Sections (dashboard)
 
 Overdue: heading and 4px left border in `--pico-del-color`. Today: 4px `--pico-primary`. Upcoming and non-current weeks: 4px `--pico-muted-border-color`. Headings always stay visible.
