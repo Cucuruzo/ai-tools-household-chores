@@ -212,15 +212,18 @@ def test_move_again_leaves_two_tombstones(client, family):
 
 
 @pytest.mark.django_db
-def test_move_back_onto_the_source_is_refused(client, family):
+def test_move_back_onto_the_source_reuses_its_tombstone(client, family):
     c, o = bins()
     move(client, c, o, "2026-11-21")
     o.refresh_from_db()
-    before = snapshot()
+    old_tombstone = tombstone(c, "2026-11-19").pk
     response = move(client, c, o, "2026-11-19")
-    assert response.status_code == 200
-    assert date_errors(response) == ["This chore already has an occurrence on Thu 19 Nov."]
-    assert snapshot() == before
+    assert response.status_code == 302
+    rows = rows_of(c)
+    assert sorted(rows) == [19, 21]
+    assert rows[19].pk == o.pk and not rows[19].is_cancelled
+    assert rows[21].is_cancelled
+    assert not ChoreOccurrence.objects.filter(pk=old_tombstone).exists()
 
 
 @pytest.mark.django_db
@@ -357,8 +360,8 @@ def test_ended_chore_cannot_move(client, family, target):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("status, cancelled", [
-    ("todo", False), ("done", False), ("skipped", False), ("todo", True),
-], ids=["todo", "done", "skipped", "cancelled"])
+    ("todo", False), ("done", False), ("skipped", False), ("done", True),
+], ids=["todo", "done", "skipped", "cancelled-done"])
 def test_occupied_target_is_refused(client, family, status, cancelled):
     c, o = bins()
     row(c, nov(21), status, is_cancelled=cancelled)

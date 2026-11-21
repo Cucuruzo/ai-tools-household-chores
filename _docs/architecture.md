@@ -314,8 +314,9 @@ An empty or unchanged date is the #39 save above. Any other date calls
   written): the target must be in `[today, min(31 Dec 2099, end_date)]`
   ("Pick a day from Wed 18 Nov to Thu 31 Dec 2099."; an `end_date` before today
   gives "This chore has ended, so this occurrence can't move.") and must
-  have no row of this chore, cancelled included ("This chore already has
-  an occurrence on Thu 19 Nov."). The source can be any date, including an
+  have no row of this chore except a cancelled to-do row, which is deleted
+  first (#49; a #24 `cancel` undo of that row is then refused) ("This chore
+  already has an occurrence on Thu 19 Nov."). The source can be any date, including an
   overdue row from an earlier week. A daily chore is always refused.
 - **Rotation**: the date keeps its turn and member; `advance_rotation` is
   not called and `RotationState` is not written.

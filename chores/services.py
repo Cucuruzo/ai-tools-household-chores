@@ -880,8 +880,16 @@ def _move_attempt(occurrence, target, due_time, points, title, instructions, tod
                 due_time=due_time, points=points,
             )
             return True
-        if ChoreOccurrence.objects.filter(chore_id=chore.pk, date=target).exists():
-            raise _taken_refused(target, today)
+        # A cancelled todo row on the target gives way (#49): it is deleted, not
+        # un-cancelled, so the moved row keeps its pk. A lost race deletes 0 rows.
+        held = ChoreOccurrence.objects.select_for_update().filter(
+            chore_id=chore.pk, date=target).first()
+        if held is not None:
+            deleted, _ = ChoreOccurrence.objects.filter(
+                pk=held.pk, is_cancelled=True, status=ChoreOccurrence.Status.TODO,
+            ).delete()
+            if not deleted:
+                raise _taken_refused(target, today)
         source = row.date
         # The update comes first: it frees (chore, source) for the tombstone.
         ChoreOccurrence.objects.filter(pk=row.pk).update(
@@ -909,7 +917,8 @@ def move_occurrence(occurrence, target, due_time, points, title, instructions, t
     gets ``is_cancelled=True`` and an extra exception is created on
     ``target`` (``moved_from`` the row's date, its member, the posted values,
     ``is_override=True``, no turn). Up to this Sunday, ``target`` must hold
-    no row of this chore (cancelled rows included), and one UPDATE sets the row's date, due time, points,
+    no row of this chore except a cancelled todo row (#49), which is deleted
+    first (0 rows deleted, a lost race, refuses), and one UPDATE sets the row's date, due time, points,
     title, instructions and ``is_override=True`` (same pk, same member, no
     rotation turn), then a cancelled todo tombstone is stored on the old
     date with the row's old member, due time, points, title and
