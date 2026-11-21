@@ -30,7 +30,7 @@
       · <span class="status">{{ card.label }}</span>
     </small>
   </p>
-  {% if card.streak >= 2 %}<p class="streak" title="Streak: {{ card.streak }} in a row">🔥 {{ card.streak }}</p>{% endif %}
+  {% if card.streak >= 2 %}<p class="streak" title="Streak: {{ card.streak }} in a row">🔥 {{ card.streak }}</p>{% endif %}{% if card.instructions %}<p class="instructions">{{ card.instructions|linebreaksbr }}</p>{% endif %}
   {% if card.status == "done" %}<p class="credit">{% if card.completed_by %}Done by <span class="avatar">{{ card.completed_by.avatar }}</span> <span class="name">{{ card.completed_by.name }}</span>{% else %}Done · not credited{% endif %}</p>{% endif %}
 </article>
 {% if card.pk and not card_only %}

@@ -275,7 +275,8 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   old title. Planned cards and dots, and `/progress/`, show the chore's
   current title. After a recurrence change, older rows still count in
   the same streak (6 daily `done` rows and 1 weekly `done` row show 7 in a
-  row).
+  row). Stored cards and history show the row's own instructions, and Planned
+  cards the chore's current ones (#47).
 
 ## Moving one occurrence (#40)
 

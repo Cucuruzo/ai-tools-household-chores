@@ -26,7 +26,7 @@
           <strong class="title">{{ o.title }}</strong>
           <span class="status">{% if o.status == "done" %}Done{% else %}Skipped{% endif %}</span>
           <span class="points">{% if o.status == "done" %}{{ o.points }} pts{% else %}—{% endif %}</span>
-          {% if o.member %}<span class="assignee">Assigned to <span class="avatar">{{ o.member.avatar }}</span> <span class="name">{{ o.member.name }}</span></span>{% else %}<span class="assignee">Unassigned</span>{% endif %}
+          {% if o.member %}<span class="assignee">Assigned to <span class="avatar">{{ o.member.avatar }}</span> <span class="name">{{ o.member.name }}</span></span>{% else %}<span class="assignee">Unassigned</span>{% endif %}{% if o.instructions %}<p class="instructions">{{ o.instructions|linebreaksbr }}</p>{% endif %}
           {% if o.status == "done" %}
             <p class="credit">{% if o.completed_by %}Done by <span class="avatar">{{ o.completed_by.avatar }}</span> <span class="name">{{ o.completed_by.name }}</span>{% else %}Done · not credited{% endif %}{% if o.done_at %} · <time datetime="{{ o.done_at|date:'c' }}">{{ o.done_at|date:'D j M, H:i' }}</time>{% endif %}</p>
           {% endif %}

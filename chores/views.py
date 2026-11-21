@@ -72,6 +72,7 @@ def _stored_cards(occurrences, pools, today=None):
             recurring=occ.chore.recurrence != Chore.Recurrence.ONCE,
             completed_by=occ.completed_by,
             streak=streak,
+            instructions=occ.instructions,
         ))
     return cards
 
@@ -88,6 +89,7 @@ def _projected_cards(projected, pools):
             due_time=p["due_time"], points=p["points"], status=dash.PLANNED, member=member,
             assignee_note=_note(pools, chore, p["assignment_mode"], member, p["is_override"]),
             recurring=chore.recurrence != Chore.Recurrence.ONCE,
+            instructions=chore.instructions,
         ))
     return cards
 

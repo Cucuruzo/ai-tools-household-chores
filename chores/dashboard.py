@@ -113,6 +113,7 @@ class Card:
     recurring: bool = False  # picks the delete options (#5)
     completed_by: object = None  # member credited with a done card (#12)
     streak: int = 0  # the chore's streak to show (#32), 0 shows nothing
+    instructions: str = ""  # the row's own text, or the chore's for Planned (#47)
 
     @property
     def label(self):
