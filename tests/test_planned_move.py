@@ -313,7 +313,6 @@ def test_same_target_writes_nothing(client, family):
     ("2026-12-05", "Pick a day from Mon 23 Nov to Fri 4 Dec.", "end"),
     ("2026-11-26", "This chore already has an occurrence on Thu 26 Nov.", None),
     ("2027-01-07", "This chore already has an occurrence on Thu 7 Jan 2027.", None),
-    ("2026-12-10", "This chore already has an occurrence on Thu 10 Dec.", "cancel"),
     ("2026-12-12", "This chore already has an occurrence on Sat 12 Dec.", "extra"),
     (None, "Enter a valid date.", None),
     ("", "Enter a valid date.", None),
@@ -322,14 +321,12 @@ def test_same_target_writes_nothing(client, family):
     ("2100-01-01", "Enter a valid date.", None),
     ("2026-12-5", "Enter a valid date.", None),
     ("<script>", "Enter a valid date.", None),
-], ids=["sat-21", "tue-17", "end-date", "projected", "projected-2027", "cancelled", "extra",
+], ids=["sat-21", "tue-17", "end-date", "projected", "projected-2027", "extra",
         "missing", "empty", "abc", "feb-30", "2100", "short", "script"])
 def test_refusals_write_nothing(client, family, target, message, setup):
     c, _ = bins()
     if setup == "end":
         Chore.objects.filter(pk=c.pk).update(end_date=d("2026-12-04"))
-    elif setup == "cancel":
-        services.cancel_projected_date(c, d("2026-12-10"))
     elif setup == "extra":
         extra(c, "2026-12-12", moved_from="2026-12-17")
     before = state()
@@ -341,14 +338,6 @@ def test_refusals_write_nothing(client, family, target, message, setup):
     body = follow(client, response)
     assert MESSAGE.format(message) in body
     assert "<script>" not in body.split("<main")[1]
-
-
-def test_extra_moved_back_onto_its_source_is_refused(client, family):
-    c, _ = moved_bins(client)
-    before = state()
-    response = pmove(client, c.pk, date="2026-12-05", target="2026-12-03")
-    assert messages_of(response)[-1:] == ["This chore already has an occurrence on Thu 3 Dec."]
-    assert state() == before
 
 
 @pytest.mark.parametrize("date", [None, "", "abc", "2026-02-30", "2100-01-01", "x" * 10_000])
@@ -412,7 +401,7 @@ def test_integrity_error_is_retried_once(family):
     def concurrent(*args):
         calls.append(args)
         if len(calls) == 1:
-            services.cancel_projected_date(c, d("2026-12-05"))  # a concurrent write on T
+            services.set_projected_member(c, d("2026-12-05"), None)  # a concurrent write on T
             raise IntegrityError("unique_exception_per_chore_date")
         return real(*args)
 
@@ -539,10 +528,9 @@ def test_stored_move_limits(client, family, target, message, end):
 
 def test_stored_move_onto_an_exception_is_refused(client, family):
     c, o = bins()
-    services.cancel_projected_date(c, d("2026-12-10"))
     extra(c, "2026-12-12")
     before = state()
-    for target, text in [("2026-12-10", "Thu 10 Dec"), ("2026-12-12", "Sat 12 Dec")]:
+    for target, text in [("2026-12-12", "Sat 12 Dec")]:
         response = move(client, c, o, target)
         assert date_errors(response) == [f"This chore already has an occurrence on {text}."]
     assert state() == before

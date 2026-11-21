@@ -1004,13 +1004,26 @@ def _taken_refused(day, today):
 
 
 def _later_target_taken(chore, target, today):
-    """Whether a later-week ``target`` holds a row, any exception or a
-    projected date of ``chore`` (#48). Constant query count."""
-    return (
-        ChoreOccurrence.objects.filter(chore_id=chore.pk, date=target).exists()
-        or OccurrenceException.objects.filter(chore_id=chore.pk, date=target).exists()
-        or projected_occurrence(chore, target, today) is not None
-    )
+    """Whether a later-week ``target`` of ``chore`` is taken (#48, #53).
+
+    A row on ``target`` means taken. An exception on ``target`` is locked: a
+    cancelled one (a #22 delete, a #48 move's source, a cancelled extra or a
+    cancel on a date that has left the rule) gives way and is deleted, and
+    ``target`` then counts as free (0 rows deleted, a lost race, counts as
+    taken); any other exception (an override, an ``own_values`` date or an
+    extra) means taken. Otherwise ``target`` is taken when it is a projected
+    date. Must run inside the caller's transaction. Constant query count.
+    """
+    if ChoreOccurrence.objects.filter(chore_id=chore.pk, date=target).exists():
+        return True
+    held = OccurrenceException.objects.select_for_update().filter(
+        chore_id=chore.pk, date=target).first()
+    if held is not None:
+        if not held.is_cancelled:
+            return True
+        deleted, _ = OccurrenceException.objects.filter(pk=held.pk, is_cancelled=True).delete()
+        return not deleted
+    return projected_occurrence(chore, target, today) is not None
 
 
 def _move_attempt(occurrence, target, due_time, points, title, instructions, today):
@@ -1073,7 +1086,9 @@ def move_occurrence(occurrence, target, due_time, points, title, instructions, t
     (todo, not cancelled) are locked, and ``target`` must be in
     ``[today, min(31 Dec 2099, end_date)]``; otherwise ``MoveRefused`` is
     raised and nothing is written. A ``target`` after this Sunday (#48) must
-    hold no row, exception or projected date of the chore; the row then only
+    hold no row, non-cancelled exception or projected date of the chore; a
+    cancelled exception there (#53) is deleted first (0 rows deleted, a lost
+    race, refuses). The row then only
     gets ``is_cancelled=True`` and an extra exception is created on
     ``target`` (``moved_from`` the row's date, its member, the posted values,
     ``is_override=True``, no turn). Up to this Sunday, ``target`` must hold
@@ -1117,6 +1132,9 @@ def _planned_move_attempt(chore, source, target, today):
         if exception is not None and exception.moved_from is not None:
             exception.date = target  # an extra moves again; moved_from stays
             exception.save(update_fields=["date"])
+            if on_rule(chore, source):
+                # Leaving a rule date: a cancel keeps it from coming back (#53).
+                OccurrenceException.objects.create(chore=chore, date=source, is_cancelled=True)
             return True
         OccurrenceException.objects.update_or_create(
             chore=chore, date=source, defaults={"is_cancelled": True},
@@ -1137,12 +1155,17 @@ def move_projected_date(chore, source, target, today):
     transaction, after locking the chore: returns False when ``source`` is
     not a projected date after this Sunday (nothing written). ``target``
     equal to ``source`` writes nothing. ``target`` must be in
-    ``[next Monday, min(end_date, 31 Dec 2099)]`` and hold no row, exception
-    or projected date of the chore, else ``MoveRefused`` (nothing written).
-    Then ``source`` is cancelled as ``cancel_projected_date`` does, and an
-    extra is created on ``target`` with ``source``'s projected member,
-    title, instructions, due time and points, ``moved_from=source`` and
-    ``is_override=True``. An extra that moves again only gets the new date.
+    ``[next Monday, min(end_date, 31 Dec 2099)]`` and hold no row,
+    non-cancelled exception or projected date of the chore, else
+    ``MoveRefused`` (nothing written). A cancelled exception on ``target``
+    (#53) gives way: it is deleted first (0 rows deleted, a lost race,
+    refuses). Then ``source`` is cancelled as ``cancel_projected_date``
+    does, and an extra is created on ``target`` with ``source``'s projected
+    member, title, instructions, due time and points, ``moved_from=source``
+    and ``is_override=True``. An extra that moves again only gets the new
+    date (same pk, same ``moved_from``); when ``source`` is on the rule, a
+    cancelled exception is then created on ``source`` so the rule date does
+    not come back.
     No ChoreOccurrence or RotationState is written. An ``IntegrityError``
     rolls the attempt back and it is retried once from a fresh read.
     """

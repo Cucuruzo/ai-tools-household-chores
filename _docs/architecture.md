@@ -399,19 +399,33 @@ takes no rotation turn; S keeps its turn (rule 7).
   Sunday (else 404), and T in `[next Monday, min(end_date, 31 Dec 2099)]`.
   S gets `is_cancelled=True` as `cancel_projected_date` writes it, and the
   extra copies S's projected values. If S is itself an extra, that row only
-  gets `date=T`, and `moved_from` stays. A one-off chore is a 400.
+  gets `date=T`, and `moved_from` stays; when S is on the rule
+  (`on_rule`), a new cancel is then created on S, so the rule date does not
+  come back with its rotation member (#53). Off the rule S is left with
+  nothing. A one-off chore is a 400.
 - **Stored row** (edit page, "This occurrence only", T after this Sunday):
   the row keeps its pk, date and values and only gets `is_cancelled=True`
   (it is its own tombstone). The extra has `moved_from=S`, the row's member
   and the posted values. The edit page redirect has no `occurrence=`.
-- **Taken**: T is refused when the chore has a row, any exception or a
-  projected date on T ("This chore already has an occurrence on Thu 26
-  Nov."). Dates in messages are `D j M`, plus ` Y` outside today's year.
+- **Taken** (`services._later_target_taken`): T is refused when the chore
+  has a row, a non-cancelled exception (an override, an `own_values` date
+  or an extra) or a projected date on T ("This chore already has an
+  occurrence on Thu 26 Nov."). Dates in messages are `D j M`, plus ` Y`
+  outside today's year.
+- **A cancelled exception on T gives way (#53)**, as a cancelled todo row
+  does in the current week (#49): a #22 delete, the source of an earlier
+  move (so an extra can move back onto it), a cancelled extra, or a cancel
+  on a date that has left the rule. It is locked and deleted (not
+  un-cancelled), and the move proceeds as on a free date; a lost race
+  deletes 0 rows and refuses. T on the rule still takes its turn, held by
+  the extra. A live #24 Undo of T's #22 delete is then refused (400 "This
+  delete can no longer be undone"), since `undo._restore_planned` finds no
+  cancel on T. `_left_to_show` (#43) is unaffected: a cancel never counts
+  and the extra does.
 - What the future week shows is what is stored when it becomes current.
   Nothing writes `RotationState` or a `ChoreOccurrence`; an `IntegrityError`
   rolls the attempt back and it is retried once.
-- Out of scope: into the current week or back onto the source (#51), onto a
-  date with another exception (#53).
+- Out of scope: into the current week (#51).
 
 ## Editing a one-off (#35)
 
