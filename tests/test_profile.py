@@ -210,13 +210,24 @@ def test_deleted_last_member_shows_add_your_family(client):
 
 
 @pytest.mark.django_db
-def test_non_integer_session_value_is_treated_as_stale(client):
-    make("Ann")
-    set_session(client, "abc")
+@pytest.mark.parametrize("value", ["abc", "", 1.5, True, None], ids=["str", "empty", "float", "bool", "none"])
+def test_non_integer_session_value_is_treated_as_stale(client, value):
+    # pk=1 so that int(1.5) / int(True) would hit a real member if coerced.
+    Member.objects.create(pk=1, name="Ann", role="adult", avatar="😀")
+    set_session(client, value)
     response = client.get(FAMILY)
     assert response.status_code == 200
-    assert "Who are you?" in switcher(response.content.decode())
+    nav = switcher(response.content.decode())
+    assert "Who are you?" in nav
+    assert "aria-current" not in nav
     assert "active_member_id" not in client.session
+
+
+@pytest.mark.django_db
+def test_digit_string_session_value_is_accepted(client):
+    ann = make("Ann")
+    set_session(client, str(ann.pk))
+    assert current_buttons(page(client)) == [str(ann.pk)]
 
 
 # --- Helper ----------------------------------------------------------------
@@ -235,3 +246,7 @@ def test_get_active_member_helper(rf):
     request.session["active_member_id"] = 999
     assert get_active_member(request) is None
     assert "active_member_id" not in request.session
+    for bad in (1.5, True, None):
+        request.session["active_member_id"] = bad
+        assert get_active_member(request) is None
+        assert "active_member_id" not in request.session
