@@ -126,8 +126,23 @@ def _day_of_month(chore):
     return day if day is not None and 1 <= day <= 31 else chore.start_date.day
 
 
+def _first_weekly(chore, first, last):
+    """First date in [first, last] on the chore's weekday, or None."""
+    offset = (_weekday(chore) - first.weekday()) % 7
+    return None if (last - first).days < offset else first + datetime.timedelta(days=offset)
+
+
+def _monthly_date(chore, year, month):
+    # Clamp to the month's length; the clamp never carries over.
+    return datetime.date(year, month, min(_day_of_month(chore), calendar.monthrange(year, month)[1]))
+
+
 def _rule_dates(chore, first, last, has_stored):
-    """Dates in [first, last] that match the chore's recurrence rule."""
+    """Dates in [first, last] that match the chore's recurrence rule.
+
+    Never steps past ``last``, so ranges ending on ``date.max`` do not
+    overflow (#30).
+    """
     if first > last:
         return
     recurrence = chore.recurrence
@@ -135,34 +150,74 @@ def _rule_dates(chore, first, last, has_stored):
         # Any stored occurrence means the one-off already happened (#19).
         if not has_stored and first <= chore.start_date <= last:
             yield chore.start_date
-    elif recurrence == Chore.Recurrence.DAILY:
-        day = first
-        while day <= last:
+    elif recurrence in (Chore.Recurrence.DAILY, Chore.Recurrence.WEEKLY):
+        step = 1 if recurrence == Chore.Recurrence.DAILY else 7
+        day = first if step == 1 else _first_weekly(chore, first, last)
+        while day is not None:
             yield day
-            day += ONE_DAY
-    elif recurrence == Chore.Recurrence.WEEKLY:
-        day = first + datetime.timedelta(days=(_weekday(chore) - first.weekday()) % 7)
-        while day <= last:
-            yield day
-            day += datetime.timedelta(days=7)
+            day = day + datetime.timedelta(days=step) if (last - day).days >= step else None
     elif recurrence == Chore.Recurrence.MONTHLY:
-        wanted = _day_of_month(chore)
         year, month = first.year, first.month
         while (year, month) <= (last.year, last.month):
-            # Clamp to the month's length; the clamp never carries over.
-            day = datetime.date(year, month, min(wanted, calendar.monthrange(year, month)[1]))
+            day = _monthly_date(chore, year, month)
             if first <= day <= last:
                 yield day
             year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def _count_rule_dates(chore, first, last, has_stored):
+    """How many dates ``_rule_dates`` yields, in constant time."""
+    if first > last:
+        return 0
+    recurrence = chore.recurrence
+    if recurrence == Chore.Recurrence.ONCE:
+        return int(not has_stored and first <= chore.start_date <= last)
+    if recurrence == Chore.Recurrence.DAILY:
+        return (last - first).days + 1
+    if recurrence == Chore.Recurrence.WEEKLY:
+        day = _first_weekly(chore, first, last)
+        return 0 if day is None else (last - day).days // 7 + 1
+    if recurrence == Chore.Recurrence.MONTHLY:
+        count = (last.year - first.year) * 12 + last.month - first.month + 1
+        count -= _monthly_date(chore, first.year, first.month) < first
+        count -= _monthly_date(chore, last.year, last.month) > last
+        return count
+    return 0
+
+
+def _rotation_pools(members):
+    """``eligible_pool`` for every eligibility, from one (order, id) list of
+    all members, so projection needs no query per chore or per date."""
+    pools = {Chore.Eligibility.EVERYONE: members}
+    for eligibility, role in _ROLE_FOR_ELIGIBILITY.items():
+        pools[eligibility] = [m for m in members if m.role == role]
+    return pools
+
+
+def _first_turn_index(pool, last, current_order):
+    """Index in ``pool`` of ``next_member(chore, last)``; ``pool`` is non-empty.
+
+    Same rule as ``next_member``: ``last``'s current order when it still
+    exists (``_rotation_key``), the order stored on the object otherwise.
+    """
+    if last is None:
+        return 0
+    key = (current_order.get(last.pk, last.order), last.pk)
+    return next((i for i, m in enumerate(pool) if (m.order, m.pk) > key), 0)
 
 
 def project_occurrences(start, end, today=None):
     """Occurrences that would happen in [start, end], without writing anything.
 
     Dates with a stored occurrence, and anything before a chore's window
-    start, are never returned. Rotating chores simulate turns in memory with
-    ``next_member`` from ``RotationState.last_member``, one turn per projected
-    date from the window start, so the result matches what #9 will store.
+    start, are never returned. Rotating chores simulate the turns that
+    ``next_member`` would give from ``RotationState.last_member``, one turn
+    per projected date from the window start, so the result matches what #9
+    will store. The simulation runs in memory on pools loaded once per call:
+    after the first turn the rotation just cycles through the pool, so turn
+    ``k`` is ``pool[(first + k) % len(pool)]`` and the turns before ``start``
+    are counted, not walked. The query count does not depend on the range
+    (#30).
     """
     if end < start:
         return []
@@ -177,35 +232,46 @@ def project_occurrences(start, end, today=None):
         state.chore_id: state.last_member
         for state in RotationState.objects.select_related("last_member")
     }
+    members = list(Member.objects.order_by("order", "id"))
+    pools = _rotation_pools(members)
+    current_order = {m.pk: m.order for m in members}
 
     results = []
     for chore in Chore.objects.filter(is_template=False):
         latest_stored = latest.get(chore.pk)
+        if latest_stored == datetime.date.max:
+            continue  # nothing can come after it
+        has_stored = latest_stored is not None
         first = _window_start(chore, latest_stored, today)
-        # Rotating chores walk from the window start so earlier turns count.
-        walk_from = first if chore.assignment_mode == Chore.AssignmentMode.ROTATING else max(first, start)
         last_day = _last_projectable_date(chore, end)
-        last = last_members.get(chore.pk)
-        for day in _rule_dates(chore, walk_from, last_day, latest_stored is not None):
+        from_day = max(first, start)
+        rotating = chore.assignment_mode == Chore.AssignmentMode.ROTATING
+        if rotating:
+            pool = pools.get(chore.eligibility, [])
+            # Turns taken in [first, start) count, so the walk from the
+            # window start is not needed (empty pool: no member, keep last).
+            turn = 0
+            if pool:
+                turn = _first_turn_index(pool, last_members.get(chore.pk), current_order)
+                if start > first:
+                    turn += _count_rule_dates(chore, first, min(last_day, start - ONE_DAY), has_stored)
+        for day in _rule_dates(chore, from_day, last_day, has_stored):
             if chore.assignment_mode == Chore.AssignmentMode.FIXED:
                 member_id = chore.assigned_to_id
-            elif chore.assignment_mode == Chore.AssignmentMode.ROTATING:
-                member = next_member(chore, last)
-                if member is not None:  # empty pool: like advance_rotation, keep last
-                    last = member
-                member_id = member.pk if member else None
+            elif rotating:
+                member_id = pool[turn % len(pool)].pk if pool else None
+                turn += 1
             else:
                 member_id = None
-            if day >= start:
-                results.append({
-                    "chore_id": chore.pk,
-                    "title": chore.title,
-                    "date": day,
-                    "due_time": chore.due_time,
-                    "member_id": member_id,
-                    "points": chore.points,
-                    "assignment_mode": chore.assignment_mode,
-                })
+            results.append({
+                "chore_id": chore.pk,
+                "title": chore.title,
+                "date": day,
+                "due_time": chore.due_time,
+                "member_id": member_id,
+                "points": chore.points,
+                "assignment_mode": chore.assignment_mode,
+            })
     results.sort(key=lambda o: (o["date"], o["title"], o["chore_id"]))
     return results
 
