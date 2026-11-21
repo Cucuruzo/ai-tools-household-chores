@@ -1155,9 +1155,11 @@ def planned_assign(request, chore_id):
 
 @require_POST
 def planned_move(request, chore_id):
-    """Move one projected date ``date`` of a recurring chore to ``target`` in
-    a later week (#48). A plain POST that returns to the posted dashboard
-    view; a refused target is a message there and writes nothing.
+    """Move one projected date ``date`` of a recurring chore to ``target``,
+    from today to ``min(end_date, 31 Dec 2099)``: a later week (#48) or the
+    current week (#51), where it becomes a todo row right away. A plain POST
+    that returns to the posted dashboard view; a refused target is a message
+    there and writes nothing.
 
     ``date`` must be a projected date after this Sunday for the viewer's
     ``today`` (#26), read once and also passed to ``move_projected_date``.

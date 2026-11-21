@@ -396,7 +396,9 @@ takes no rotation turn; S keeps its turn (rule 7).
 
 - **Planned date** (`POST /dashboard/move/planned/<id>/`,
   `services.move_projected_date`): S must be a projected date after this
-  Sunday (else 404), and T in `[next Monday, min(end_date, 31 Dec 2099)]`.
+  Sunday (else 404), and T in `[today, min(end_date, 31 Dec 2099)]`
+  ("Pick a day from Wed 18 Nov to Thu 31 Dec 2099."). A T up to this
+  Sunday is a current-week move (#51, below).
   S gets `is_cancelled=True` as `cancel_projected_date` writes it, and the
   extra copies S's projected values. If S is itself an extra, that row only
   gets `date=T`, and `moved_from` stays; when S is on the rule
@@ -425,7 +427,25 @@ takes no rotation turn; S keeps its turn (rule 7).
 - What the future week shows is what is stored when it becomes current.
   Nothing writes `RotationState` or a `ChoreOccurrence`; an `IntegrityError`
   rolls the attempt back and it is retried once.
-- Out of scope: into the current week (#51).
+- **Into the current week (#51)**: a Planned date moved onto T with
+  `today <= T <= Sunday` becomes a todo row right away
+  (`services._into_this_week`, in the same `_planned_move_attempt`
+  transaction). `materialize_week(current Monday, today)` runs first,
+  before the chore is locked, so every rule date of the week has a row and
+  "taken" is decided on rows: a row of the chore on T refuses, unless it is
+  a cancelled todo row, which gives way as in #49 (deleted; a lost race
+  refuses, and a live #24 `cancel` Undo of it is then refused). One todo
+  row is created on T with S's projected member, title, instructions, due
+  time and points and `is_override=True`, with `ChoreOccurrence.objects.create`
+  (not `create_occurrence`), so the move takes **no rotation turn**; only
+  `materialize_week` may write `RotationState`. S is then cancelled as
+  `cancel_projected_date` writes it (it keeps its turn, and #53 can target
+  it again), except an extra off the rule, whose exception is deleted so
+  nothing is left there. A refusal rolls everything back, the
+  materialization included. `today` is the viewer's (#26), so Kiritimati
+  and UTC differ. `_left_to_show` (#43) needs no change: a projected date
+  becomes a non-cancelled todo row, and both count. The new row is an
+  ordinary stored row (#12 Done / Skip, #13 assign, #5 / #22 delete).
 
 ## Editing a one-off (#35)
 

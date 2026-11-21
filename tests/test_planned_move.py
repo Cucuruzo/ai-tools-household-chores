@@ -308,9 +308,9 @@ def test_same_target_writes_nothing(client, family):
 
 
 @pytest.mark.parametrize("target, message, setup", [
-    ("2026-11-21", "Pick a day from Mon 23 Nov to Thu 31 Dec 2099.", None),
-    ("2026-11-17", "Pick a day from Mon 23 Nov to Thu 31 Dec 2099.", None),
-    ("2026-12-05", "Pick a day from Mon 23 Nov to Fri 4 Dec.", "end"),
+    ("2026-11-19", "This chore already has an occurrence on Thu 19 Nov.", None),
+    ("2026-11-17", "Pick a day from Wed 18 Nov to Thu 31 Dec 2099.", None),
+    ("2026-12-05", "Pick a day from Wed 18 Nov to Fri 4 Dec.", "end"),
     ("2026-11-26", "This chore already has an occurrence on Thu 26 Nov.", None),
     ("2027-01-07", "This chore already has an occurrence on Thu 7 Jan 2027.", None),
     ("2026-12-12", "This chore already has an occurrence on Sat 12 Dec.", "extra"),
@@ -321,7 +321,7 @@ def test_same_target_writes_nothing(client, family):
     ("2100-01-01", "Enter a valid date.", None),
     ("2026-12-5", "Enter a valid date.", None),
     ("<script>", "Enter a valid date.", None),
-], ids=["sat-21", "tue-17", "end-date", "projected", "projected-2027", "extra",
+], ids=["thu-19-row", "tue-17", "end-date", "projected", "projected-2027", "extra",
         "missing", "empty", "abc", "feb-30", "2100", "short", "script"])
 def test_refusals_write_nothing(client, family, target, message, setup):
     c, _ = bins()
@@ -848,9 +848,9 @@ def test_kiritimati_vs_utc(client, family):
     assert pmove(client, c.pk, date="2026-11-26", target="2026-11-27",
                  when=SUN_NOON, tz="Pacific/Kiritimati").status_code == 404
     assert state() == before
-    response = pmove(client, c.pk, date="2026-12-03", target="2026-11-28",
+    response = pmove(client, c.pk, date="2026-12-03", target="2026-11-22",
                      when=SUN_NOON, tz="Pacific/Kiritimati")
-    assert messages_of(response) == ["Pick a day from Mon 30 Nov to Thu 31 Dec 2099."]
+    assert messages_of(response) == ["Pick a day from Mon 23 Nov to Thu 31 Dec 2099."]
     assert state() == before
     response = pmove(client, c.pk, date="2026-11-26", target="2026-11-27", when=SUN_NOON, tz="UTC")
     assert messages_of(response)[-1:] == ["Occurrence moved to Fri 27 Nov"]

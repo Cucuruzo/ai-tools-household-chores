@@ -1108,23 +1108,69 @@ def move_occurrence(occurrence, target, due_time, points, title, instructions, t
         return _move_attempt(occurrence, target, due_time, points, title, instructions, today)
 
 
-# --- Moving a Planned date into a later week (#48) -------------------------------------
+# --- Moving a Planned date into a later week (#48) or this week (#51) -------------------
+
+
+def _into_this_week(chore, source, target, projected, today):
+    """Move projected date ``source`` onto ``target`` of the current week (#51).
+
+    The week is already materialized, so every rule date has a row and
+    "taken" is decided on rows: a row of the chore on ``target`` refuses,
+    unless it is a cancelled todo row (#49), which is deleted (0 rows
+    deleted, a lost race, refuses). One todo row is then created on
+    ``target`` with ``source``'s projected member and values and
+    ``is_override=True``, without ``create_occurrence``, so no rotation turn
+    is taken. ``source`` is cancelled as ``cancel_projected_date`` does, or,
+    for an extra off the rule, its exception is deleted. Must run inside the
+    caller's transaction.
+    """
+    held = ChoreOccurrence.objects.select_for_update().filter(
+        chore_id=chore.pk, date=target).first()
+    if held is not None:
+        deleted, _ = ChoreOccurrence.objects.filter(
+            pk=held.pk, is_cancelled=True, status=ChoreOccurrence.Status.TODO,
+        ).delete()
+        if not deleted:
+            raise _taken_refused(target, today)
+    ChoreOccurrence.objects.create(
+        chore_id=chore.pk, date=target, member_id=projected["member_id"],
+        due_time=projected["due_time"], points=projected["points"], title=projected["title"],
+        instructions=projected["instructions"], status=ChoreOccurrence.Status.TODO,
+        is_override=True,
+    )
+    exception = OccurrenceException.objects.select_for_update().filter(
+        chore_id=chore.pk, date=source).first()
+    if exception is not None and exception.moved_from is not None and not on_rule(chore, source):
+        OccurrenceException.objects.filter(pk=exception.pk).delete()  # nothing left off the rule
+    else:
+        OccurrenceException.objects.update_or_create(
+            chore=chore, date=source, defaults={"is_cancelled": True},
+        )
+    return True
 
 
 def _planned_move_attempt(chore, source, target, today):
     with transaction.atomic():
-        chore = Chore.objects.select_for_update().filter(pk=chore.pk, is_template=False).first()
         sunday = _monday_of(today) + 6 * ONE_DAY
+        if target <= sunday:
+            # Into this week (#51): every rule date of the week gets its row
+            # first, before the chore is locked, as ``move_occurrence`` does.
+            materialize_week(_monday_of(today), today=today)
+        chore = Chore.objects.select_for_update().filter(pk=chore.pk, is_template=False).first()
         if chore is None or source <= sunday:
+            transaction.set_rollback(True)  # nothing is written, materialization included
             return False
         projected = projected_occurrence(chore, source, today)
         if projected is None:
+            transaction.set_rollback(True)
             return False
         if target == source:
             return True
         last = LAST_MOVE_DAY if chore.end_date is None else min(LAST_MOVE_DAY, chore.end_date)
-        if not sunday < target <= last:
-            raise _range_refused(sunday + ONE_DAY, last, today)
+        if not today <= target <= last:
+            raise _range_refused(today, last, today)
+        if target <= sunday:
+            return _into_this_week(chore, source, target, projected, today)
         if _later_target_taken(chore, target, today):
             raise _taken_refused(target, today)
         exception = OccurrenceException.objects.select_for_update().filter(
@@ -1149,13 +1195,24 @@ def _planned_move_attempt(chore, source, target, today):
 
 
 def move_projected_date(chore, source, target, today):
-    """Move projected date ``source`` of ``chore`` to ``target`` in a later week (#48).
+    """Move projected date ``source`` of ``chore`` to ``target`` (#48, #51).
 
     ``today`` is the caller's local date; this never reads the clock. In one
     transaction, after locking the chore: returns False when ``source`` is
     not a projected date after this Sunday (nothing written). ``target``
     equal to ``source`` writes nothing. ``target`` must be in
-    ``[next Monday, min(end_date, 31 Dec 2099)]`` and hold no row,
+    ``[today, min(end_date, 31 Dec 2099)]``, else ``MoveRefused`` (nothing
+    written).
+
+    A ``target`` up to this Sunday (#51): the current week is materialized
+    first (before the chore is locked), then ``_into_this_week`` creates one
+    todo row on ``target`` with ``source``'s projected member and values,
+    ``is_override=True`` and no rotation turn, and cancels ``source`` (or
+    deletes it, for an extra off the rule). A row on ``target`` refuses
+    unless it is a cancelled todo row, which gives way (#49). Only
+    ``materialize_week`` may write ``RotationState``; a refusal rolls it back.
+
+    A ``target`` after this Sunday must hold no row,
     non-cancelled exception or projected date of the chore, else
     ``MoveRefused`` (nothing written). A cancelled exception on ``target``
     (#53) gives way: it is deleted first (0 rows deleted, a lost race,
@@ -1165,8 +1222,8 @@ def move_projected_date(chore, source, target, today):
     and ``is_override=True``. An extra that moves again only gets the new
     date (same pk, same ``moved_from``); when ``source`` is on the rule, a
     cancelled exception is then created on ``source`` so the rule date does
-    not come back.
-    No ChoreOccurrence or RotationState is written. An ``IntegrityError``
+    not come back. There, no ChoreOccurrence or RotationState is written.
+    An ``IntegrityError``
     rolls the attempt back and it is retried once from a fresh read.
     """
     try:

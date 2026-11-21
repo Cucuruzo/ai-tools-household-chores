@@ -364,7 +364,7 @@ def test_range_limits_come_before_the_give_way(client, family):
     Chore.objects.filter(pk=c.pk).update(end_date=d("2026-12-04"))
     before = state()
     response = pmove(client, c.pk, date="2026-12-03", target="2026-12-10")
-    assert messages_of(response) == ["Pick a day from Mon 23 Nov to Fri 4 Dec."]
+    assert messages_of(response) == ["Pick a day from Wed 18 Nov to Fri 4 Dec."]
     response = move(client, c, o, "2026-12-10")
     assert date_errors(response) == ["Pick a day from Wed 18 Nov to Fri 4 Dec."]
     assert state() == before
@@ -374,10 +374,10 @@ def test_kiritimati_vs_utc(client, family):
     c, _ = bins()
     cancel_projected_date(c, d("2026-11-26"))
     before = state()
-    # Sun 22 12:00 UTC is Mon 23 in Kiritimati: Thu 26 is in the current week there.
-    response = pmove(client, c.pk, date="2026-12-03", target="2026-11-26",
+    # Sun 22 12:00 UTC is Mon 23 in Kiritimati: Sun 22 is already past there.
+    response = pmove(client, c.pk, date="2026-12-03", target="2026-11-22",
                      when=SUN_NOON, tz="Pacific/Kiritimati")
-    assert messages_of(response) == ["Pick a day from Mon 30 Nov to Thu 31 Dec 2099."]
+    assert messages_of(response) == ["Pick a day from Mon 23 Nov to Thu 31 Dec 2099."]
     assert state() == before
     response = pmove(client, c.pk, date="2026-12-03", target="2026-11-26", when=SUN_NOON, tz="UTC")
     assert messages_of(response)[-1:] == ["Occurrence moved to Thu 26 Nov"]
