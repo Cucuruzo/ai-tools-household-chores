@@ -82,6 +82,33 @@ class Chore(models.Model):
         return self.title
 
 
+class ChoreOccurrence(models.Model):
+    """A stored (materialized) instance of a chore on one date (#9)."""
+
+    class Status(models.TextChoices):
+        TODO = "todo", "To do"
+        DONE = "done", "Done"
+        SKIPPED = "skipped", "Skipped"
+
+    chore = models.ForeignKey(Chore, on_delete=models.CASCADE, related_name="occurrences")
+    member = models.ForeignKey(
+        Member, null=True, blank=True, on_delete=models.SET_NULL, related_name="occurrences"
+    )
+    date = models.DateField()
+    due_time = models.TimeField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.TODO)
+    done_at = models.DateTimeField(null=True, blank=True)
+    is_override = models.BooleanField(default=False)
+    points = models.IntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["chore", "date"], name="unique_occurrence_per_chore_date"),
+        ]
+
+    def __str__(self):
+        return f"{self.chore} on {self.date}"
+
 class RotationState(models.Model):
     """Who had the last turn of a rotating chore. Written only by
     services.advance_rotation (one turn per stored occurrence, #9)."""

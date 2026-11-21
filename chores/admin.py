@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Chore, Member, RotationState
+from .models import Chore, ChoreOccurrence, Member, RotationState
 
 
 @admin.register(Member)
@@ -18,3 +18,9 @@ class ChoreAdmin(admin.ModelAdmin):
 @admin.register(RotationState)
 class RotationStateAdmin(admin.ModelAdmin):
     list_display = ["chore", "last_member"]
+
+
+@admin.register(ChoreOccurrence)
+class ChoreOccurrenceAdmin(admin.ModelAdmin):
+    list_display = ["date", "chore", "member", "status", "points"]
+    list_filter = ["status"]

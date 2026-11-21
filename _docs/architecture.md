@@ -98,13 +98,14 @@ becomes current or when a one-off / ad-hoc chore is added.
 | Field       | Type                                         |
 |-------------|----------------------------------------------|
 | id          | AutoField (PK)                               |
-| chore       | ForeignKey(Chore)                            |
-| member      | ForeignKey(Member, nullable) — can be unassigned |
+| chore       | ForeignKey(Chore, on_delete=CASCADE)         |
+| member      | ForeignKey(Member, nullable, on_delete=SET_NULL) — can be unassigned |
 | date        | DateField                                    |
 | due_time    | TimeField (nullable)                         |
 | status      | CharField (choices: `todo`, `done`, `skipped`) |
 | done_at     | DateTimeField (nullable)                     |
 | is_override | BooleanField (default False) — edited for this occurrence only |
+| points      | IntegerField — copied from the chore when stored |
 
 **Unique constraint:** (chore, date)
 
