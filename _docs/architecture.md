@@ -39,7 +39,7 @@ ai-tools-household-chores/
       chores_tags.py
     templates/
       chores/
-        base.html                  # shell: Pico CSS, HTMX, profile switcher
+        base.html                  # shell: Pico CSS, style.css, HTMX, profile switcher, site nav
         dashboard.html             # weekly dashboard (main screen)
         calendar.html              # monthly calendar
         chore_form.html            # create / edit chore (full page)
@@ -488,6 +488,8 @@ the chore row still exists after the delete:
 ```
 +-------------------------------------------------------+
 | [Profile switcher: avatar + name]     Household Chores |
+| Dashboard · Calendar · Family · Contribution · Progress |
+| · History · Templates                                  |
 +-------------------------------------------------------+
 | < This Week (Sep 7 - 13, 2026) >    [+ Add Chore]     |
 | Filters: [Member v] [Day v]                           |
@@ -502,8 +504,6 @@ the chore row still exists after the delete:
 | UPCOMING                                               |
 |   Wed: Vacuum living room — Mom — 10 pts              |
 |   Fri: Change bed sheets — rotating — 20 pts          |
-+-------------------------------------------------------+
-| [Contribution] [Calendar] [Family] [History]           |
 +-------------------------------------------------------+
 ```
 

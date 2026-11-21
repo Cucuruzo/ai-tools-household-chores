@@ -1,4 +1,4 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -23,19 +23,27 @@
     })();
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+  <link rel="stylesheet" href="{% static 'chores/style.css' %}">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
-  <style>
-    #profile-switcher ul { flex-wrap: wrap; }
-    #profile-switcher form { margin: 0; }
-    #profile-switcher button { margin: 0; padding: 0.25rem 0.75rem; }
-    #profile-switcher button.active { font-weight: bold; border: 2px solid var(--pico-contrast); }
-  </style>
   {% block head %}{% endblock %}
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   <header class="container">
     <p><time datetime="{{ now_local|date:'c' }}">{{ now_local|date:'D j M, H:i' }}</time></p>
     {% include "chores/_profile_switcher.html" %}
+    {% with page=request.resolver_match.url_name %}
+    <nav id="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="{% url 'dashboard' %}"{% if page == 'dashboard' %} aria-current="page"{% endif %}>Dashboard</a></li>
+        <li><a href="{% url 'calendar' %}"{% if page == 'calendar' %} aria-current="page"{% endif %}>Calendar</a></li>
+        <li><a href="{% url 'family' %}"{% if page == 'family' or page == 'member_add' or page == 'member_edit' or page == 'member_move' or page == 'member_delete' %} aria-current="page"{% endif %}>Family</a></li>
+        <li><a href="{% url 'contribution' %}"{% if page == 'contribution' %} aria-current="page"{% endif %}>Contribution</a></li>
+        <li><a href="{% url 'progress' %}"{% if page == 'progress' %} aria-current="page"{% endif %}>Progress</a></li>
+        <li><a href="{% url 'history' %}"{% if page == 'history' %} aria-current="page"{% endif %}>History</a></li>
+        <li><a href="{% url 'template_list' %}"{% if page == 'template_list' or page == 'template_edit' or page == 'template_delete' %} aria-current="page"{% endif %}>Templates</a></li>
+      </ul>
+    </nav>
+    {% endwith %}
   </header>
   <main class="container">
     {% block content %}{% endblock %}

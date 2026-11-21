@@ -20,7 +20,7 @@
               hx-target="#templates" hx-select="#templates" hx-swap="outerHTML">Delete</button>
     </article>
   {% empty %}
-    <p>No household templates yet. Tick "Also save as a household template" when saving a chore to add one.</p>
+    <p class="empty-state">No household templates yet. Tick "Also save as a household template" when saving a chore to add one.</p>
   {% endfor %}
 
   <p><a href="{% url 'chore_create' %}">Back to new chore</a></p>

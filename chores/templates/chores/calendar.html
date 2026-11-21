@@ -31,4 +31,11 @@
 {% block content %}
 {% for message in messages %}<p class="message" role="status"><mark>{{ message }}</mark></p>{% endfor %}
 {% include "chores/_calendar_grid.html" %}
+<ul id="calendar-legend" aria-label="Dot colours">
+  <li><span class="dot dot-todo" aria-hidden="true"></span> To do</li>
+  <li><span class="dot dot-overdue" aria-hidden="true"></span> Overdue</li>
+  <li><span class="dot dot-done" aria-hidden="true"></span> Done</li>
+  <li><span class="dot dot-skipped" aria-hidden="true"></span> Skipped</li>
+  <li><span class="dot dot-planned" aria-hidden="true"></span> Planned</li>
+</ul>
 {% endblock %}

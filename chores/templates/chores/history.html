@@ -14,9 +14,9 @@
   <button type="submit">Show</button>
 </form>
 {% if never_any %}
-  <p>No completed or skipped chores yet</p>
+  <p class="empty-state">No completed or skipped chores yet</p>
 {% elif not groups %}
-  <p>Nothing here</p>
+  <p class="nothing-here">Nothing here</p>
 {% else %}
   {% for day, items in groups %}
     <h2><time datetime="{{ day|date:'Y-m-d' }}">{{ day|date:'D j M Y' }}</time></h2>
