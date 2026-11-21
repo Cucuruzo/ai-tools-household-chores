@@ -154,6 +154,15 @@ def _dashboard_redirect(params):
     return redirect(reverse("dashboard") + dash.dashboard_query(week, member, day))
 
 
+def _append_switcher_oob(request, response, next_url):
+    """Out-of-band header switcher whose ``next`` is the view just swapped in."""
+    response.content += render_to_string(
+        "chores/_profile_switcher.html",
+        {"switcher_oob": True, "switcher_next": next_url},
+        request,
+    ).encode()
+
+
 @require_GET
 def dashboard(request):
     # One clock read: "now" and "today" are the same instant in the viewer's
@@ -167,6 +176,8 @@ def dashboard(request):
     partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
     template = "chores/_dashboard_list.html" if partial else "chores/dashboard.html"
     response = render(request, template, context)
+    if partial:
+        _append_switcher_oob(request, response, context["switcher_next"])
     # The same URL serves a partial or a full page; keep browser caches apart.
     patch_vary_headers(response, ["HX-Request", "HX-History-Restore-Request"])
     return response
@@ -244,6 +255,8 @@ def calendar(request):
     partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
     template = "chores/_calendar_grid.html" if partial else "chores/calendar.html"
     response = render(request, template, context)
+    if partial:
+        _append_switcher_oob(request, response, context["switcher_next"])
     patch_vary_headers(response, ["HX-Request", "HX-History-Restore-Request"])
     return response
 

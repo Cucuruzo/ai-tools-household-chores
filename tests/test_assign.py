@@ -560,6 +560,8 @@ def test_member_filter_mismatch_retargets_list(client, filter_value, target, mis
     with at(WED):
         expected = Client().get("/dashboard/", {"member": fvalue, "day": "3"}, **HTMX).content.decode()
     strip = lambda s: re.sub(r'(name="csrfmiddlewaretoken" value=")[^"]*"', r'\1"', s)
+    oob = re.compile(r'<nav id="profile-switcher" hx-swap-oob="true".*?</nav>\n?', re.S)
+    expected = oob.sub("", expected)
     assert strip(body) == strip(expected)
     assert f"occurrence-{o.pk}" not in body
     if fvalue != "unassigned":
