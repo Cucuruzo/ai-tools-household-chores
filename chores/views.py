@@ -16,8 +16,8 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from . import dashboard as dash
 from .forms import ChoreForm, MemberForm, find_template
 from .models import Chore, ChoreOccurrence, Member
-from .profile import MAX_PK, _parse_pk, is_valid_pk, set_active_member
-from .services import eligible_pool, materialize_week, project_occurrences
+from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
+from .services import eligible_pool, materialize_week, project_occurrences, set_occurrence_status
 
 
 @require_GET
@@ -48,12 +48,13 @@ def _note(pools, chore, mode, member, is_override):
 
 def _stored_cards(occurrences, pools):
     cards = []
-    for occ in occurrences.select_related("chore", "member"):
+    for occ in occurrences.select_related("chore", "member", "completed_by"):
         cards.append(dash.Card(
             pk=occ.pk, chore_id=occ.chore_id, title=occ.chore.title, date=occ.date,
             due_time=occ.due_time, points=occ.points, status=occ.status, member=occ.member,
             assignee_note=_note(pools, occ.chore, occ.chore.assignment_mode, occ.member, occ.is_override),
             recurring=occ.chore.recurrence != Chore.Recurrence.ONCE,
+            completed_by=occ.completed_by,
         ))
     return cards
 
@@ -142,6 +143,13 @@ def _dashboard_filters(params):
     if isinstance(member, int) and not Member.objects.filter(pk=member).exists():
         member = None
     return monday, member, dash.parse_day_filter(params.get("day"))
+
+
+def _dashboard_redirect(params):
+    """302 back to the dashboard view described by ``params`` (GET or POST data)."""
+    monday, member, day = _dashboard_filters(params)
+    week = dash.week_param(monday) if monday else None
+    return redirect(reverse("dashboard") + dash.dashboard_query(week, member, day))
 
 
 @require_GET
@@ -418,6 +426,60 @@ def chore_delete(request, pk):
                 start = occurrence.date if occurrence else timezone.localdate()
                 _delete_from(chore, start)
     messages.success(request, "Chore deleted")
+    return _dashboard_redirect(request.POST)
+
+
+# --- Done / skip / undo (#12) ------------------------------------------------------
+
+_TOGGLE_TARGET = {
+    "done": ChoreOccurrence.Status.DONE,
+    "skip": ChoreOccurrence.Status.SKIPPED,
+    "undo": ChoreOccurrence.Status.TODO,
+}
+
+
+def _toggle_allowed_from(action):
+    if action == "undo":
+        return (ChoreOccurrence.Status.DONE, ChoreOccurrence.Status.SKIPPED)
+    return (ChoreOccurrence.Status.TODO,)
+
+
+def _toggle_success(request, pk):
+    """The swapped card block for HTMX, else the 302 back to the same view."""
+    if not _is_htmx(request):
+        return _dashboard_redirect(request.POST)
+    now = timezone.localtime()  # one clock read, viewer's zone (#26)
+    today = timezone.localdate(now)
+    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache())
+    if not cards:  # removed after the write
+        raise Http404("No such occurrence")
+    [card] = cards
+    card.overdue = dash.is_overdue(card, today, now)
     monday, member, day = _dashboard_filters(request.POST)
-    week = dash.week_param(monday) if monday else None
-    return redirect(reverse("dashboard") + dash.dashboard_query(week, member, day))
+    context = {"card": card}
+    context.update(_filter_context(dash.week_nav(monday or dash.monday_of(today), today), member, day))
+    return render(request, "chores/_chore_card.html", context)
+
+
+@require_POST
+def occurrence_toggle(request, pk):
+    if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
+        raise Http404("No such occurrence")
+    occurrence = get_object_or_404(_shown_occurrences(), pk=pk)
+    action = request.POST.get("action")
+    if action not in _TOGGLE_TARGET:
+        return HttpResponseBadRequest("Unknown action")
+    target = _TOGGLE_TARGET[action]
+    if occurrence.status == target:
+        return _toggle_success(request, pk)  # repeat: nothing to write
+    if occurrence.status not in _toggle_allowed_from(action):
+        return HttpResponseBadRequest("Undo first")
+    credited = get_active_member(request) if action == "done" else None
+    if not set_occurrence_status(occurrence, action, credited, timezone.now()):
+        # Lost a race: the row changed or was cancelled after it was read.
+        current = _shown_occurrences().filter(pk=pk).first()
+        if current is None:
+            raise Http404("No such occurrence")
+        if current.status != target:
+            return HttpResponseBadRequest("Undo first")
+    return _toggle_success(request, pk)

@@ -329,3 +329,34 @@ def materialize_week(week_start, today=None):
         return _materialize_attempt(week_start, today)
     except IntegrityError:
         return _materialize_attempt(week_start, today)
+
+
+# --- Done / skip / undo (#12) ---------------------------------------------------
+
+_TARGET_STATUS = {
+    "done": ChoreOccurrence.Status.DONE,
+    "skip": ChoreOccurrence.Status.SKIPPED,
+    "undo": ChoreOccurrence.Status.TODO,
+}
+
+
+def set_occurrence_status(occurrence, action, credited_member, now):
+    """Apply ``action`` ("done", "skip" or "undo") to ``occurrence``.
+
+    One conditional update on the status that was read, so a concurrent
+    change or a cancellation since then makes it match nothing. Only
+    ``status``, ``done_at`` and ``completed_by`` are written; rotation,
+    assignment and points never change. ``credited_member`` (a Member or
+    None) and ``now`` (the aware UTC instant the caller read once; this
+    module never reads the clock itself) are used only for "done". Returns
+    True when the row was written, False when the update matched 0 rows.
+    """
+    done = action == "done"
+    updated = ChoreOccurrence.objects.filter(
+        pk=occurrence.pk, status=occurrence.status, is_cancelled=False
+    ).update(
+        status=_TARGET_STATUS[action],
+        done_at=now if done else None,
+        completed_by=credited_member if done else None,
+    )
+    return updated == 1

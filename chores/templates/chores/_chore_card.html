@@ -3,8 +3,12 @@
   #5, #12 and #13; projected cards (status "Planned") have no id.
   Stored cards are followed by their Delete confirmation (#5): a plain form
   POST in a <details>, so it opens and closes without a request or JS.
+  Then the Done/Skip/Undo form (#12), outside the <article>. A stored card's
+  whole block is wrapped in <div class="card-block" id="card-<pk>">, which
+  the status form swaps (hx-target), so Delete and the buttons update together.
 {% endcomment %}
-<article class="chore-card"{% if card.pk %} id="occurrence-{{ card.pk }}"{% endif %}>
+{% if card.pk %}<div class="card-block" id="card-{{ card.pk }}">
+{% endif %}<article class="chore-card"{% if card.pk %} id="occurrence-{{ card.pk }}"{% endif %}>
   <p class="title">
     <strong><a href="{% url 'chore_edit' card.chore_id %}">{% if card.struck %}<s>{{ card.title }}</s>{% else %}{{ card.title }}{% endif %}</a></strong>
   </p>
@@ -18,6 +22,7 @@
       · <span class="status">{{ card.label }}</span>
     </small>
   </p>
+  {% if card.status == "done" %}<p class="credit">{% if card.completed_by %}Done by <span class="avatar">{{ card.completed_by.avatar }}</span> <span class="name">{{ card.completed_by.name }}</span>{% else %}Done · not credited{% endif %}</p>{% endif %}
 </article>
 {% if card.pk %}
 <details class="delete-confirm">
@@ -38,4 +43,17 @@
     <button type="button" class="secondary" onclick="this.closest('details').open = false;">Cancel</button>
   </form>
 </details>
+<form class="status" method="post" action="{% url 'occurrence_toggle' card.pk %}" hx-post="{% url 'occurrence_toggle' card.pk %}" hx-target="#card-{{ card.pk }}" hx-swap="outerHTML">
+  {% csrf_token %}
+  {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+  {% if filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+  {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+  {% if card.status == "todo" %}
+    <button type="submit" name="action" value="done">Done</button>
+    <button type="submit" name="action" value="skip" class="secondary">Skip</button>
+  {% else %}
+    <button type="submit" name="action" value="undo" class="secondary">Undo</button>
+  {% endif %}
+</form>
+</div>
 {% endif %}

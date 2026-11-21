@@ -104,6 +104,10 @@ class ChoreOccurrence(models.Model):
     points = models.IntegerField()
     # "Delete this occurrence only" (#5): the row stays so it is never recreated.
     is_cancelled = models.BooleanField(default=False)
+    # Who is credited with the points (#12); ``member`` stays the assignee.
+    completed_by = models.ForeignKey(
+        Member, null=True, blank=True, on_delete=models.SET_NULL, related_name="completed_occurrences"
+    )
 
     class Meta:
         constraints = [

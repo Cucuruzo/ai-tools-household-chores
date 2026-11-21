@@ -104,10 +104,11 @@ becomes current or when a one-off / ad-hoc chore is added.
 | date        | DateField                                    |
 | due_time    | TimeField (nullable)                         |
 | status      | CharField (choices: `todo`, `done`, `skipped`) |
-| done_at     | DateTimeField (nullable)                     |
+| done_at     | DateTimeField (nullable) — completion time, stored in UTC (#12) |
 | is_override | BooleanField (default False) — edited for this occurrence only |
 | points      | IntegerField — copied from the chore when stored |
 | is_cancelled | BooleanField (default False) — "delete this occurrence only" (#5); the row stays so it is never recreated, and it is hidden everywhere |
+| completed_by | ForeignKey(Member, nullable, on_delete=SET_NULL) — the member credited with the points (#12); `member` stays the assignee |
 
 **Unique constraint:** (chore, date)
 
@@ -246,8 +247,8 @@ with that date pre-filled.
 
 | Action                  | Trigger          | HTMX Attribute         | Swaps                  |
 |-------------------------|------------------|------------------------|------------------------|
-| Mark chore done/skip    | Click button     | `hx-post`              | `_chore_card.html`     |
-| Undo completion         | Click undo       | `hx-post`              | `_chore_card.html`     |
+| Mark chore done/skip    | Click button     | `hx-post`              | `#card-<pk>` (the `card-block` wrapper in `_chore_card.html`) |
+| Undo completion         | Click undo       | `hx-post`              | `#card-<pk>` (the `card-block` wrapper in `_chore_card.html`) |
 | Navigate week           | Click < or >     | `hx-get`               | `_dashboard_list.html` |
 | Filter by member/day    | Change dropdown  | `hx-get`               | `_dashboard_list.html` |
 | Assign/reassign         | Submit dropdown  | `hx-post`              | `_chore_card.html`     |

@@ -111,6 +111,7 @@ class Card:
     assignee_note: str = UNASSIGNED
     overdue: bool = False
     recurring: bool = False  # picks the delete options (#5)
+    completed_by: object = None  # member credited with a done card (#12)
 
     @property
     def label(self):
