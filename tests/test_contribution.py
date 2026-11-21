@@ -424,6 +424,14 @@ def test_row_markup_order(client):
     assert '<progress value="10" max="10">100%</progress>' in inner
 
 
+HX_CSRF = re.compile(r'("X-CSRFToken": ")[^"]*"')
+
+
+def page_without_tokens(response):
+    """The whole page with every CSRF token blanked: tokens are random and can spell a banned word (#45)."""
+    return HX_CSRF.sub(r'\1"', blank_csrf(response.content.decode()))
+
+
 @pytest.mark.django_db
 def test_ties_keep_member_order_with_identical_bars(client):
     a, b = member("A", "kid", 0), member("B", "kid", 1)
@@ -432,7 +440,7 @@ def test_ties_keep_member_order_with_identical_bars(client):
     got = lines(view(client))
     assert list(got) == [f"contribution-member-{a.pk}", f"contribution-member-{b.pk}"]
     assert got[f"contribution-member-{a.pk}"]["bar"] == got[f"contribution-member-{b.pk}"]["bar"]
-    assert "tie" not in view(client).content.decode().lower()
+    assert "tie" not in page_without_tokens(view(client)).lower()
 
 
 @pytest.mark.django_db
@@ -543,7 +551,7 @@ def test_no_ranking_words(client, period):
     mom, dad, _ = trio()
     done("a", by=mom, points=20)
     done("b", by=dad)
-    body = view(client, period).content.decode().lower()
+    body = page_without_tokens(view(client, period)).lower()
     for word in ("winner", "loser", "rank", "leader", "1st", "2nd", "3rd", "place", "🏆", "🥇", "🥈", "🥉", "medal"):
         assert word not in body
 
