@@ -280,11 +280,8 @@ def _family_pk_param(request, name):
     values = request.GET.getlist(name)
     if not values:
         return None
-    raw = values[0]
-    if len(values) > 1 or not (raw.isascii() and raw.isdigit()):
-        raise Http404
-    pk = int(raw)
-    if not 1 <= pk <= MAX_PK or not Member.objects.filter(pk=pk).exists():
+    pk = _parse_pk(values[0]) if len(values) == 1 else None
+    if pk is None or not Member.objects.filter(pk=pk).exists():
         raise Http404
     return pk
 
