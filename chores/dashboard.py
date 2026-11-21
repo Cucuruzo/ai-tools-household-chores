@@ -110,6 +110,7 @@ class Card:
     member: object = None
     assignee_note: str = UNASSIGNED
     overdue: bool = False
+    recurring: bool = False  # picks the delete options (#5)
 
     @property
     def label(self):

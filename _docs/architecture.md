@@ -89,6 +89,7 @@ On deletion: active chore occurrences assigned to this member become unassigned.
 | is_template      | BooleanField (default False)                             |
 | is_builtin       | BooleanField (default False) — built-in template shipped with the app (read-only) |
 | template_source  | ForeignKey('self', nullable, SET_NULL) — template (built-in or household) it was created from |
+| end_date         | DateField (nullable) — last date the chore is projected on; set by "delete this and future" (#5), never moved later |
 
 ### ChoreOccurrence
 
@@ -106,6 +107,7 @@ becomes current or when a one-off / ad-hoc chore is added.
 | done_at     | DateTimeField (nullable)                     |
 | is_override | BooleanField (default False) — edited for this occurrence only |
 | points      | IntegerField — copied from the chore when stored |
+| is_cancelled | BooleanField (default False) — "delete this occurrence only" (#5); the row stays so it is never recreated, and it is hidden everywhere |
 
 **Unique constraint:** (chore, date)
 

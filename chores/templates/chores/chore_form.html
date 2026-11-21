@@ -128,5 +128,22 @@
 </script>
   {# The script sits inside #chore-form-area so it re-runs when HTMX swaps in a template. #}
   </div>
+
+  {% if chore and not editing_template %}
+  {# Outside #chore-form: forms cannot nest (#5). #}
+  <details class="delete-confirm">
+    <summary role="button" class="outline contrast">Delete</summary>
+    <form method="post" action="{% url 'chore_delete' chore.pk %}">
+      {% csrf_token %}
+      {% if chore.recurrence == "once" %}
+        <p>Delete this chore?</p>
+        <button type="submit" name="scope" value="future" class="contrast">Delete</button>
+      {% else %}
+        <button type="submit" name="scope" value="future" class="contrast">This and all future occurrences, starting today</button>
+      {% endif %}
+      <button type="button" class="secondary" onclick="this.closest('details').open = false;">Cancel</button>
+    </form>
+  </details>
+  {% endif %}
 </section>
 {% endblock %}

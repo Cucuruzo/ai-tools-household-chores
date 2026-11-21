@@ -53,6 +53,7 @@ def _stored_cards(occurrences, pools):
             pk=occ.pk, chore_id=occ.chore_id, title=occ.chore.title, date=occ.date,
             due_time=occ.due_time, points=occ.points, status=occ.status, member=occ.member,
             assignee_note=_note(pools, occ.chore, occ.chore.assignment_mode, occ.member, occ.is_override),
+            recurring=occ.chore.recurrence != Chore.Recurrence.ONCE,
         ))
     return cards
 
@@ -73,7 +74,8 @@ def _projected_cards(projected, pools):
 
 def _shown_occurrences():
     # Templates never get rows (#9); the filter keeps it that way on screen too.
-    return ChoreOccurrence.objects.filter(chore__is_template=False)
+    # Cancelled rows (#5) stay stored but are shown nowhere.
+    return ChoreOccurrence.objects.filter(chore__is_template=False, is_cancelled=False)
 
 
 def _dashboard_context(monday, today, now, member_filter=None, day_filter=None):
@@ -129,17 +131,27 @@ def _filter_context(nav, member, day):
     }
 
 
+def _dashboard_filters(params):
+    """Normalized ``(monday or None, member, day)`` from GET or POST data.
+
+    Unparsable values become None, and a member pk is dropped when that
+    member does not exist, so callers only ever see safe values.
+    """
+    monday = dash.parse_week(params.get("week"))
+    member = dash.parse_member_filter(params.get("member"), _parse_pk)
+    if isinstance(member, int) and not Member.objects.filter(pk=member).exists():
+        member = None
+    return monday, member, dash.parse_day_filter(params.get("day"))
+
+
 @require_GET
 def dashboard(request):
     # One clock read: "now" and "today" are the same instant in the viewer's
     # zone (#26); timezone.localdate(now) is timezone.localdate() for it.
     now = timezone.localtime()
     today = timezone.localdate(now)
-    monday = dash.parse_week(request.GET.get("week")) or dash.monday_of(today)
-    member_filter = dash.parse_member_filter(request.GET.get("member"), _parse_pk)
-    if isinstance(member_filter, int) and not Member.objects.filter(pk=member_filter).exists():
-        member_filter = None
-    day_filter = dash.parse_day_filter(request.GET.get("day"))
+    monday, member_filter, day_filter = _dashboard_filters(request.GET)
+    monday = monday or dash.monday_of(today)
     context = _dashboard_context(monday, today, now, member_filter, day_filter)
     context.update(_filter_context(context["nav"], member_filter, day_filter))
     partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
@@ -318,3 +330,64 @@ def chore_edit(request, pk):
     if request.method == "POST":
         return _save_chore(request, ChoreForm(request.POST, instance=chore), chore)
     return _chore_form_page(request, ChoreForm(instance=chore), chore)
+
+
+# --- Delete (#5) -----------------------------------------------------------------
+
+_HISTORY = (ChoreOccurrence.Status.DONE, ChoreOccurrence.Status.SKIPPED)
+
+
+def _end_before(chore, day):
+    """Stop projecting ``chore`` from ``day`` on; an earlier end_date stays."""
+    end = day - datetime.timedelta(days=1)
+    if chore.end_date is None or end < chore.end_date:
+        chore.end_date = end
+        chore.save(update_fields=["end_date"])
+
+
+def _delete_from(chore, start):
+    """"This and future" from ``start``: todo rows on/after it go, history stays."""
+    chore.occurrences.filter(status=ChoreOccurrence.Status.TODO, date__gte=start).delete()
+    if chore.occurrences.filter(status__in=_HISTORY).exists():
+        _end_before(chore, start)
+    else:
+        chore.delete()  # occurrences and RotationState go by CASCADE
+
+
+@require_POST
+def chore_delete(request, pk):
+    if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
+        raise Http404("No such chore")
+    with transaction.atomic():
+        # Templates are deleted only through template_delete (#23).
+        chore = get_object_or_404(Chore.objects.select_for_update(), pk=pk, is_template=False)
+        occurrence = None
+        if "occurrence" in request.POST:
+            occurrence_pk = _parse_pk(request.POST["occurrence"])
+            if occurrence_pk is None:
+                raise Http404("No such occurrence")
+            occurrence = get_object_or_404(
+                ChoreOccurrence, pk=occurrence_pk, chore=chore, is_cancelled=False
+            )
+        if chore.recurrence == Chore.Recurrence.ONCE:
+            # scope is ignored: delete the chore unless it has history.
+            if chore.occurrences.filter(status__in=_HISTORY).exists():
+                _end_before(chore, chore.start_date)
+            else:
+                chore.delete()
+        else:
+            scope = request.POST.get("scope")
+            if scope not in ("this", "future"):
+                return HttpResponseBadRequest("scope must be 'this' or 'future'")
+            if scope == "this":
+                if occurrence is None or occurrence.status != ChoreOccurrence.Status.TODO:
+                    return HttpResponseBadRequest("Only a to-do occurrence can be deleted on its own")
+                occurrence.is_cancelled = True
+                occurrence.save(update_fields=["is_cancelled"])
+            else:
+                start = occurrence.date if occurrence else timezone.localdate()
+                _delete_from(chore, start)
+    messages.success(request, "Chore deleted")
+    monday, member, day = _dashboard_filters(request.POST)
+    week = dash.week_param(monday) if monday else None
+    return redirect(reverse("dashboard") + dash.dashboard_query(week, member, day))

@@ -111,6 +111,8 @@ def _window_start(chore, latest_stored, today):
 def _last_projectable_date(chore, end):
     """Last date a chore may be projected on. The single place for limits on
     a chore's end (#5 adds ``end_date`` here)."""
+    if chore.end_date is not None:
+        return min(end, chore.end_date)
     return end
 
 

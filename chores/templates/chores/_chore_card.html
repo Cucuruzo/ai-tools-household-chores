@@ -1,6 +1,8 @@
 {% comment %}
   One chore occurrence (#10). Stored cards carry id="occurrence-<pk>" for
   #5, #12 and #13; projected cards (status "Planned") have no id.
+  Stored cards are followed by their Delete confirmation (#5): a plain form
+  POST in a <details>, so it opens and closes without a request or JS.
 {% endcomment %}
 <article class="chore-card"{% if card.pk %} id="occurrence-{{ card.pk }}"{% endif %}>
   <p class="title">
@@ -17,3 +19,23 @@
     </small>
   </p>
 </article>
+{% if card.pk %}
+<details class="delete-confirm">
+  <summary role="button" class="outline contrast">Delete</summary>
+  <form method="post" action="{% url 'chore_delete' card.chore_id %}">
+    {% csrf_token %}
+    <input type="hidden" name="occurrence" value="{{ card.pk }}">
+    {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+    {% if filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+    {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+    {% if not card.recurring %}
+      <p>Delete this chore?</p>
+      <button type="submit" name="scope" value="future" class="contrast">Delete</button>
+    {% else %}
+      {% if card.status == "todo" %}<button type="submit" name="scope" value="this" class="contrast">This occurrence only</button>{% endif %}
+      <button type="submit" name="scope" value="future" class="contrast">This and all future occurrences</button>
+    {% endif %}
+    <button type="button" class="secondary" onclick="this.closest('details').open = false;">Cancel</button>
+  </form>
+</details>
+{% endif %}

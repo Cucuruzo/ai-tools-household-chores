@@ -77,6 +77,8 @@ class Chore(models.Model):
     template_source = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="derived_chores"
     )
+    # Last date the chore may be projected on, set by "delete this and future" (#5).
+    end_date = models.DateField(null=True, blank=True)
 
     def __str__(self):
         return self.title
@@ -100,6 +102,8 @@ class ChoreOccurrence(models.Model):
     done_at = models.DateTimeField(null=True, blank=True)
     is_override = models.BooleanField(default=False)
     points = models.IntegerField()
+    # "Delete this occurrence only" (#5): the row stays so it is never recreated.
+    is_cancelled = models.BooleanField(default=False)
 
     class Meta:
         constraints = [
