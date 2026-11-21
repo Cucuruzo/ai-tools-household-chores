@@ -219,3 +219,6 @@ __marimo__/
 
 #MacOS
 .DS_Store
+
+# collectstatic output (#50)
+staticfiles/
