@@ -1,10 +1,11 @@
 from django.urls import path
 
-from . import template_views, views
+from . import progress_views, template_views, views
 
 urlpatterns = [
     path('', views.home, name='home'),
     path('dashboard/', views.dashboard, name='dashboard'),
+    path('progress/', progress_views.progress, name='progress'),
     path('family/', views.family, name='family'),
     path('family/add/', views.member_add, name='member_add'),
     path('family/<int:pk>/edit/', views.member_edit, name='member_edit'),

@@ -1,0 +1,35 @@
+{% extends "chores/base.html" %}
+
+{% block title %}Progress · Household Chores{% endblock %}
+
+{% block content %}
+<h1>Progress</h1>
+
+<section id="streaks">
+  <h2>Streaks</h2>
+  {% if streak_rows %}
+    <ul>
+      {% for row in streak_rows %}
+        <li class="streak" id="streak-{{ row.chore.pk }}">{{ row.chore.title }} — 🔥 {{ row.count }} {{ row.unit }} in a row</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p id="no-streaks">No streaks yet. Mark a chore done to start one.</p>
+  {% endif %}
+</section>
+
+<section id="badges">
+  <h2>Badges</h2>
+  {% if badge_rows %}
+    <ul>
+      {% for row in badge_rows %}
+        <li class="member-badges" id="badges-{{ row.member.pk }}"><span class="avatar">{{ row.member.avatar }}</span> <span class="name">{{ row.member.name }}</span>
+          {% for kind, icon, label in row.badges %}<span class="badge" data-badge="{{ kind }}">{{ icon }} {{ label }}</span> {% empty %}<span class="no-badges">No badges yet</span>{% endfor %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p id="no-members-badges">Add your family to see badges. <a href="{% url 'family' %}">Family</a></p>
+  {% endif %}
+</section>
+{% endblock %}
