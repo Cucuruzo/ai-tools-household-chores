@@ -1,0 +1,17 @@
+{% extends "chores/base.html" %}
+
+{% block title %}Contribution · Household Chores{% endblock %}
+
+{% block head %}
+<style>
+  .contribution-row { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 0.25rem 1rem; align-items: center; list-style: none; margin-bottom: 0.75rem; }
+  .contribution-row .avatar { font-size: 1.5rem; }
+  .contribution-row progress { grid-column: 1 / -1; margin: 0; }
+  #contribution-list { padding: 0; }
+  #period-toggle ul { padding: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "chores/_contribution.html" %}
+{% endblock %}

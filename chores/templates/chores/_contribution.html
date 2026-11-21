@@ -1,0 +1,25 @@
+<section id="contribution">
+  <h1 id="contribution-title">{% if period == "month" %}This month ({{ heading_month|date:"F Y" }}){% else %}This week ({{ heading_week }}){% endif %}</h1>
+  <nav id="period-toggle" aria-label="Period">
+    <ul>
+      <li><a href="{{ week_url }}"{% if period == "week" %} aria-current="page"{% endif %} hx-get="{{ week_url }}" hx-target="#contribution" hx-swap="outerHTML" hx-push-url="true">This week</a></li>
+      <li><a href="{{ month_url }}"{% if period == "month" %} aria-current="page"{% endif %} hx-get="{{ month_url }}" hx-target="#contribution" hx-swap="outerHTML" hx-push-url="true">This month</a></li>
+    </ul>
+  </nav>
+  {% if not has_members %}<p id="no-members"><a href="{% url 'family' %}">Add your family to see contributions</a></p>{% endif %}
+  {% if lines %}
+  <ul id="contribution-list">
+    {% for line in lines %}
+    <li class="contribution-row" id="{% if line.member %}contribution-member-{{ line.pk }}{% else %}contribution-not-credited{% endif %}">
+      {% if line.member %}<span class="avatar">{{ line.member.avatar }}</span>{% endif %}
+      <span class="name">{% if line.member %}{{ line.member.name }}{% else %}Not credited{% endif %}</span>
+      <span class="points">{{ line.points }} points</span>
+      <span class="done-count">{{ line.done }} chore{{ line.done|pluralize }} done</span>
+      <span class="share">{{ line.share }}%</span>
+      <progress value="{{ line.points }}" max="{{ bar_max }}">{{ line.share }}%</progress>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p id="household-total">Household total: {{ total_points }} points · {{ total_done }} chores done</p>
+</section>
