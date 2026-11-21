@@ -7,6 +7,7 @@ from .profile import is_valid_pk
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 WEEKDAY_CHOICES = list(enumerate(WEEKDAYS))
 MONTHDAY_CHOICES = [(d, str(d)) for d in range(1, 32)]
+SWITCH_ERROR = "A chore that already has occurrences can't switch between Once and a repeating schedule."
 
 
 def parse_pk(raw):
@@ -183,6 +184,14 @@ class ChoreForm(forms.ModelForm):
                 self.add_error("recurrence_day", "Choose a day of the month")
         else:
             cleaned["recurrence_day"] = None
+
+        # #20: once <-> repeating only while the chore has no stored rows.
+        # ``self.instance`` still holds the saved values here.
+        previous = self.instance.recurrence
+        if (self.instance.pk is not None and recurrence and "recurrence" not in self.errors
+                and (previous == Chore.Recurrence.ONCE) != (recurrence == Chore.Recurrence.ONCE)
+                and self.instance.occurrences.exists()):
+            self.add_error("recurrence", SWITCH_ERROR)
         return cleaned
 
     # --- template helpers --------------------------------------------------
@@ -215,6 +224,24 @@ class ChoreForm(forms.ModelForm):
 
     def show_monthday(self):
         return self._current("recurrence") == Chore.Recurrence.MONTHLY
+
+
+class OccurrenceForm(forms.Form):
+    """"This occurrence only" (#20): the values one stored row may change."""
+
+    due_time = forms.TimeField(
+        required=False, label="Due time",
+        widget=forms.TimeInput(format="%H:%M", attrs={"type": "time"}),
+    )
+    points = forms.TypedChoiceField(choices=Chore.POINTS_CHOICES, coerce=int, label="Points")
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("auto_id", "occ_%s")
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def for_row(cls, occurrence):
+        return cls(initial={"due_time": occurrence.due_time, "points": occurrence.points})
 
 
 class TemplateForm(ChoreForm):

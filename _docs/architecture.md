@@ -109,7 +109,7 @@ becomes current or when a one-off / ad-hoc chore is added.
 | due_time    | TimeField (nullable)                         |
 | status      | CharField (choices: `todo`, `done`, `skipped`) |
 | done_at     | DateTimeField (nullable) — completion time, stored in UTC (#12) |
-| is_override | BooleanField (default False) — edited for this occurrence only |
+| is_override | BooleanField (default False) — edited for this occurrence only: set by #13 assign and #20 this occurrence only; never changed by a later this-and-future edit |
 | points      | IntegerField — copied from the chore when stored |
 | is_cancelled | BooleanField (default False) — "delete this occurrence only" (#5); the row stays so it is never recreated, and it is hidden everywhere |
 | completed_by | ForeignKey(Member, nullable, on_delete=SET_NULL) — the member credited with the points (#12); `member` stays the assignee |
@@ -170,6 +170,61 @@ migration. The three rules:
 - Already-materialized occurrences are never overwritten (preserving manual edits).
 - Viewing a future week shows projected data; only the current week materializes.
 
+## Edit scope (#20)
+
+Editing a **recurring** chore (`daily` / `weekly` / `monthly`) asks for a
+scope. One-off chores ignore `scope` and `occurrence` and save in place
+(#35 will sync their row).
+
+- **In place, no split.** "This and future" edits the existing `Chore` row,
+  so its pk, streak (#16), `RotationState` (#7) and `template_source` carry
+  on. Points are a snapshot on each row (#15), so past totals never change.
+- **Cutoff D**: the date of the row given as `?occurrence=<pk>` (the card's
+  title link carries it for stored cards of recurring chores), else today in
+  the viewer's zone (#26). Same rule as #5's delete. A projected card opens
+  the page without `occurrence`, so it is edited "from today" (#38).
+- **This occurrence only** (`scope=this`): a stored `todo` row only; it
+  changes `due_time` and `points` with one conditional UPDATE that also sets
+  `is_override=True` (`services.update_occurrence`). Equal values write
+  nothing. Done / skipped rows need an Undo first (400). The member is
+  changed on the card (#13); title, instructions and date are #39 / #40.
+- **This and future** (`scope=future`, `services.apply_future_edit`), in one
+  transaction:
+  - every form field is saved on the chore; `end_date`, `template_source`,
+    `is_template` and `is_builtin` never change;
+  - **start date clamp**: when a rule field (`start_date`, `recurrence`,
+    `recurrence_day`) changed, `start_date = max(posted, D)`, so projection
+    never puts new-rule dates before D;
+  - rows dated before D, and done, skipped, cancelled and **override** rows on
+    or after D, are never written or deleted (one flag, no per-field tracking:
+    a row reassigned with #13 also keeps its points and due time);
+  - **follower rows** (todo, not cancelled, not override, date >= D): after a
+    rule change, a row no longer on the new rule (`services.on_rule`) is
+    deleted and its rotation turn is not given back; the others get the new
+    due time and points, and a new member from `advance_rotation` when an
+    assignment field (`assignment_mode`, `eligibility`, `assigned_to`)
+    changed;
+  - **fill**: after a rule change, every new-rule date of the current week
+    from `max(D, current Monday)` without any row (cancelled included) is
+    stored with `create_occurrence`. Followers and fill dates go in one pass
+    in date order, so turns follow the calendar. Past weeks are never filled;
+    future weeks are projected from the day after the latest stored row;
+  - an `IntegrityError` from a fill row (a concurrent materialization) rolls
+    the whole edit back, turns included, and it is retried once, as
+    `materialize_week` does. Any other error leaves everything as before.
+- **Unstored dates**: after a rule change, old-rule dates between Monday and
+  D-1 that nobody stored are never created (the clamp puts `start_date` at
+  D). Without a rule change, unstored dates are projected and stored later
+  with the new values.
+- **Once ↔ repeating**: not allowed once the chore has any stored row (form
+  error on `recurrence`); stop a repeating chore with Delete (#5). Without
+  rows it is a plain in-place save.
+- **Accepted costs**: `title` and `instructions` live only on `Chore`, so a
+  rename also shows on rows dated before D (history, contribution, progress,
+  past cards) until #39. After a recurrence change, older rows still count in
+  the same streak (6 daily `done` rows and 1 weekly `done` row show 7 in a
+  row).
+
 ## Screens and URL Design
 
 ```
@@ -185,8 +240,12 @@ migration. The three rules:
 
 /chores/create/                    GET    chore creation form
 /chores/create/?date=2026-09-08    GET    chore creation with pre-filled date
-/chores/<id>/edit/                 GET    edit chore form
-/chores/<id>/edit/                 POST   save chore edits
+/chores/<id>/edit/                 GET    edit chore form (recurring: cutoff D = today)
+/chores/<id>/edit/?occurrence=<pk> GET    edit a recurring chore from one stored row (#20): D = its date,
+                                          plus the "This occurrence only" form for a todo row;
+                                          bad pk, another chore's row or a cancelled row: 404
+/chores/<id>/edit/                 POST   save chore edits; recurring: scope=this|future (#20, missing = future,
+                                          anything else 400), occurrence=<pk> as on GET
 /chores/<id>/delete/               POST   delete chore (with scope: this/future)
 /chores/create/                    POST   save new chore
 /chores/templates/                 GET    manage household templates

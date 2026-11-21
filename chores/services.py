@@ -360,3 +360,124 @@ def set_occurrence_status(occurrence, action, credited_member, now):
         completed_by=credited_member if done else None,
     )
     return updated == 1
+
+
+# --- Edit scope (#20) -----------------------------------------------------------
+
+# Fields of a chore that decide which dates it falls on, and who gets them.
+RULE_FIELDS = ("start_date", "recurrence", "recurrence_day")
+ASSIGNMENT_FIELDS = ("assignment_mode", "eligibility", "assigned_to_id")
+
+
+def on_rule(chore, day):
+    """Whether ``day`` is one of ``chore``'s dates, as ``_rule_dates`` would
+    yield it: on or after ``start_date``, not after ``end_date``, and on the
+    weekday / day of month (clamped to the month length). Read-only."""
+    if day < chore.start_date:
+        return False
+    if chore.end_date is not None and day > chore.end_date:
+        return False
+    recurrence = chore.recurrence
+    if recurrence == Chore.Recurrence.DAILY:
+        return True
+    if recurrence == Chore.Recurrence.WEEKLY:
+        return day.weekday() == _weekday(chore)
+    if recurrence == Chore.Recurrence.MONTHLY:
+        return day == _monthly_date(chore, day.year, day.month)
+    return False  # once: not a repeating rule
+
+
+def update_occurrence(occurrence, due_time, points):
+    """"This occurrence only": set one todo row's ``due_time`` and ``points``.
+
+    One conditional update on the row, its chore, ``status="todo"`` and
+    ``is_cancelled=False``; it also sets ``is_override``. Nothing is written
+    when both values equal the ones read. Returns False only when the update
+    matched 0 rows (the row changed since it was read), True otherwise.
+    """
+    if occurrence.due_time == due_time and occurrence.points == points:
+        return True
+    updated = ChoreOccurrence.objects.filter(
+        pk=occurrence.pk,
+        chore_id=occurrence.chore_id,
+        status=ChoreOccurrence.Status.TODO,
+        is_cancelled=False,
+    ).update(due_time=due_time, points=points, is_override=True)
+    return updated == 1
+
+
+def _future_edit_attempt(chore, old, day, today):
+    with transaction.atomic():
+        Chore.objects.select_for_update().filter(pk=chore.pk).first()
+        rule_changed = any(getattr(chore, f) != old[f] for f in RULE_FIELDS)
+        assignment_changed = any(getattr(chore, f) != old[f] for f in ASSIGNMENT_FIELDS)
+        if rule_changed:
+            chore.start_date = max(chore.start_date, day)
+        chore.save()
+
+        followers = list(
+            ChoreOccurrence.objects.select_for_update().filter(
+                chore=chore,
+                date__gte=day,
+                status=ChoreOccurrence.Status.TODO,
+                is_cancelled=False,
+                is_override=False,
+            )
+        )
+        fill = []
+        if rule_changed:
+            monday = _monday_of(today)
+            first, sunday = max(day, monday), monday + 6 * ONE_DAY
+            taken = set(
+                ChoreOccurrence.objects.filter(
+                    chore=chore, date__gte=first, date__lte=sunday
+                ).values_list("date", flat=True)
+            )
+            g = first
+            while g <= sunday:
+                if g not in taken and on_rule(chore, g):
+                    fill.append(g)
+                g += ONE_DAY
+
+        # One pass in date order, so rotation turns follow the calendar.
+        # Follower and fill dates never coincide (fill skips stored dates).
+        steps = [(o.date, o) for o in followers] + [(g, None) for g in fill]
+        steps.sort(key=lambda step: step[0])
+        for when, row in steps:
+            if row is None:
+                create_occurrence(chore, when)
+            elif rule_changed and not on_rule(chore, when):
+                row.delete()  # a todo row is not history; the turn is not given back
+            else:
+                row.due_time = chore.due_time
+                row.points = chore.points
+                fields = ["due_time", "points"]
+                if assignment_changed:
+                    row.member = advance_rotation(chore)
+                    fields.append("member")
+                row.save(update_fields=fields)
+        return chore
+
+
+def apply_future_edit(chore, old, day, today):
+    """"This and future" from cutoff ``day`` (D), editing ``chore`` in place.
+
+    ``chore`` holds the new values (``form.save(commit=False)``); ``old`` maps
+    ``RULE_FIELDS`` and ``ASSIGNMENT_FIELDS`` to their values before the
+    edit. ``today`` is the caller's local date; this never reads the clock.
+
+    In one transaction: the chore is saved (``start_date`` clamped to at least
+    D when a rule field changed); follower rows (todo, not cancelled, not
+    override, dated D or later) off the new rule are deleted, the others get
+    the new due time and points, and a new member from ``advance_rotation``
+    when an assignment field changed; after a rule change, the current week
+    is filled from ``max(D, current Monday)`` with ``create_occurrence``.
+    Nothing dated before D, and no done, skipped, cancelled or override row,
+    is written. A concurrent materialization that stores a fill date first
+    makes the attempt roll back (rotation turns included); it is retried
+    once from a fresh read, as ``materialize_week`` does.
+    """
+    try:
+        return _future_edit_attempt(chore, old, day, today)
+    except IntegrityError:
+        return _future_edit_attempt(chore, old, day, today)

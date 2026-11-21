@@ -15,10 +15,13 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from . import dashboard as dash
 from . import month
-from .forms import ChoreForm, MemberForm, find_template
+from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
-from .services import eligible_pool, materialize_week, project_occurrences, set_occurrence_status
+from .services import (
+    ASSIGNMENT_FIELDS, RULE_FIELDS, apply_future_edit, eligible_pool, materialize_week,
+    project_occurrences, set_occurrence_status, update_occurrence,
+)
 
 
 @require_GET
@@ -419,8 +422,10 @@ def profile_switch(request, pk):
     return redirect(target)
 
 
-def _chore_form_page(request, form, chore=None, start_date=None, filters=None):
+def _chore_form_page(request, form, chore=None, start_date=None, filters=None, scope=None):
     context = {"form": form, "chore": chore, "prefill_date": start_date}
+    if scope is not None:  # a recurring chore's edit scope (#20)
+        context.update(scope)
     if filters is not None:  # normalized (monday, member, day) from the dashboard (#27)
         monday, member, day = filters
         week = dash.week_param(monday) if monday else None
@@ -440,25 +445,86 @@ def _chore_form_page(request, form, chore=None, start_date=None, filters=None):
     return render(request, "chores/chore_form.html", context)
 
 
-def _save_chore(request, form, chore=None, filters=None):
-    """Validate a bound ChoreForm and save; returns a response."""
+def _edit_redirect(pk, filters, occurrence=None):
+    """302 to the edit page with #27's query, plus ``occurrence=`` when given."""
+    url = reverse("chore_edit", args=[pk])
+    if filters is not None:
+        monday, member, day = filters
+        url += dash.dashboard_query(dash.week_param(monday) if monday else None, member, day)
+    if occurrence is not None:
+        url += ("&" if "?" in url else "?") + f"occurrence={occurrence.pk}"
+    return redirect(url)
+
+
+def _save_chore(request, form, chore=None, filters=None, scope=None):
+    """Validate a bound ChoreForm and save; returns a response.
+
+    With ``scope`` (a recurring chore's edit, #20) a repeating schedule is
+    saved "this and future" from ``scope["scope_day"]``.
+    """
+    old = None
+    if scope is not None:  # read before is_valid(), which writes the form values onto it
+        old = {name: getattr(chore, name) for name in RULE_FIELDS + ASSIGNMENT_FIELDS}
     if not form.is_valid():
-        return _chore_form_page(request, form, chore, filters=filters)
+        if scope is not None:
+            # Show the saved chore (Delete options), not the rejected values.
+            chore = Chore.objects.get(pk=chore.pk)
+        return _chore_form_page(request, form, chore, filters=filters, scope=scope)
     creating = chore is None
     with transaction.atomic():
         chore = form.save(commit=False)
         if creating:
             chore.template_source = form.cleaned_data["template"]
-        chore.save()
+        if scope is not None and chore.recurrence != Chore.Recurrence.ONCE:
+            apply_future_edit(chore, old, scope["scope_day"], scope["scope_today"])
+        else:
+            chore.save()
         add_template = form.cleaned_data["save_as_template"]
         if add_template:
             form.save_household_template(chore)
     messages.success(request, "Chore saved and template added" if add_template else "Chore saved")
-    if filters is None:
-        return redirect("chore_edit", pk=chore.pk)
-    monday, member, day = filters
-    week = dash.week_param(monday) if monday else None
-    return redirect(reverse("chore_edit", args=[chore.pk]) + dash.dashboard_query(week, member, day))
+    return _edit_redirect(chore.pk, filters)
+
+
+def _edit_occurrence(chore, data):
+    """The ``occurrence=`` row of ``chore`` (last value), None when absent;
+    404 for anything hostile, another chore's row or a cancelled row."""
+    if "occurrence" not in data:
+        return None
+    pk = _parse_pk(data.get("occurrence"))
+    if pk is None:
+        raise Http404("No such occurrence")
+    return get_object_or_404(ChoreOccurrence, pk=pk, chore=chore, is_cancelled=False)
+
+
+def _scope_context(occurrence, today):
+    """Template values for a recurring chore's edit page (#20)."""
+    context = {"scope_day": occurrence.date if occurrence else today, "scope_today": today,
+               "scope_occurrence": occurrence}
+    if occurrence is not None and occurrence.status == ChoreOccurrence.Status.TODO:
+        context["occurrence_form"] = OccurrenceForm.for_row(occurrence)
+    return context
+
+
+def _save_occurrence(request, chore, occurrence, filters, scope):
+    """"This occurrence only" (#20): due time and points of one todo row."""
+    if occurrence is None:
+        return HttpResponseBadRequest("Choose an occurrence")
+    if occurrence.status != ChoreOccurrence.Status.TODO:
+        return HttpResponseBadRequest("Undo first")
+    form = OccurrenceForm(request.POST)
+    if not form.is_valid():
+        scope["occurrence_form"] = form
+        return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters, scope=scope)
+    if not update_occurrence(occurrence, form.cleaned_data["due_time"], form.cleaned_data["points"]):
+        # Lost a race: the row changed after it was read.
+        current = ChoreOccurrence.objects.filter(pk=occurrence.pk, chore=chore, is_cancelled=False).first()
+        if current is None:
+            raise Http404("No such occurrence")
+        if current.status != ChoreOccurrence.Status.TODO:
+            return HttpResponseBadRequest("Undo first")
+    messages.success(request, "Occurrence saved")
+    return _edit_redirect(chore.pk, filters, occurrence)
 
 
 @require_http_methods(["GET", "POST"])
@@ -484,10 +550,25 @@ def chore_edit(request, pk):
     # Templates (is_template=True) are not editable here; that is #23.
     chore = get_object_or_404(Chore, pk=pk, is_template=False)
     # The dashboard view to return to: the form posts it back as hidden inputs.
-    filters = _dashboard_filters(request.POST if request.method == "POST" else request.GET)
-    if request.method == "POST":
-        return _save_chore(request, ChoreForm(request.POST, instance=chore), chore, filters)
-    return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters)
+    data = request.POST if request.method == "POST" else request.GET
+    filters = _dashboard_filters(data)
+    if chore.recurrence == Chore.Recurrence.ONCE:
+        # One-off chores: occurrence and scope are ignored (#20; #35 syncs the row).
+        if request.method == "POST":
+            return _save_chore(request, ChoreForm(request.POST, instance=chore), chore, filters)
+        return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters)
+    # Recurring: cutoff D is the occurrence's date, else today in the viewer's zone.
+    occurrence = _edit_occurrence(chore, data)
+    today = timezone.localdate()
+    scope = _scope_context(occurrence, today)
+    if request.method == "GET":
+        return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters, scope=scope)
+    choice = request.POST.get("scope", "future")
+    if choice not in ("this", "future"):
+        return HttpResponseBadRequest("scope must be 'this' or 'future'")
+    if choice == "this":
+        return _save_occurrence(request, chore, occurrence, filters, scope)
+    return _save_chore(request, ChoreForm(request.POST, instance=chore), chore, filters, scope)
 
 
 # --- Delete (#5) -----------------------------------------------------------------
