@@ -1,6 +1,7 @@
 {% comment %}
   Template picker for /chores/create/. Each link works without HTMX (full page
-  with the form pre-filled); with HTMX it swaps only #chore-form-area.
+  with the form pre-filled); with HTMX it swaps #chore-form-area and takes the
+  header's #profile-switcher out of band, so its `next` follows the pushed URL.
 {% endcomment %}
 {% if builtin_templates or household_templates %}
 <section id="template-picker">
@@ -14,6 +15,7 @@
           <li>
             <a href="{{ create_url }}?template={{ t.pk }}{% if prefill_date %}&amp;date={{ prefill_date|date:"Y-m-d" }}{% endif %}{{ picker_return }}"
                hx-get="{{ create_url }}?template={{ t.pk }}{% if prefill_date %}&amp;date={{ prefill_date|date:"Y-m-d" }}{% endif %}{{ picker_return }}"
+               hx-select-oob="#profile-switcher"
                hx-target="#chore-form-area" hx-select="#chore-form-area"
                hx-swap="outerHTML" hx-push-url="true">{{ t.title }}</a>
           </li>
