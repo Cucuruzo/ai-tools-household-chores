@@ -1,0 +1,27 @@
+{% comment %}
+  Member and day filters (#11), included from _dashboard_list.html. The values
+  are the normalized ones from the view, never the raw query string.
+{% endcomment %}
+<form id="dashboard-filters" method="get" action="{% url 'dashboard' %}"
+      hx-get="{% url 'dashboard' %}" hx-trigger="change"
+      hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">
+  {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+  <label for="filter-member">Member
+    <select id="filter-member" name="member">
+      <option value=""{% if filter_member == "" %} selected{% endif %}>Everyone</option>
+      {% for m in members %}
+        <option value="{{ m.pk }}"{% if filter_member == m.pk %} selected{% endif %}>{{ m.name }}</option>
+      {% endfor %}
+      <option value="unassigned"{% if filter_member == "unassigned" %} selected{% endif %}>Unassigned</option>
+    </select>
+  </label>
+  <label for="filter-day">Day
+    <select id="filter-day" name="day">
+      <option value=""{% if filter_day is None %} selected{% endif %}>All days</option>
+      {% for day in filter_days %}
+        <option value="{{ forloop.counter }}"{% if filter_day == forloop.counter %} selected{% endif %}>{{ day|date:"D, M j" }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <noscript><button type="submit">Apply</button></noscript>
+</form>

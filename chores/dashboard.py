@@ -193,3 +193,50 @@ def mark_past_overdue(cards):
     for card in cards:
         card.overdue = card.status == TODO
     return cards
+
+
+# --- Filters (#11) -----------------------------------------------------------
+
+UNASSIGNED_FILTER = "unassigned"
+
+
+def parse_member_filter(raw, pk_parser):
+    """``"unassigned"``, a member pk (as an int) or None for "Everyone".
+
+    ``pk_parser`` is ``chores.profile._parse_pk``; whether the member exists
+    is for the caller to check.
+    """
+    if raw == UNASSIGNED_FILTER:
+        return UNASSIGNED_FILTER
+    return pk_parser(raw)
+
+
+def parse_day_filter(raw):
+    """ISO weekday 1-7 from exactly one ASCII digit, else None."""
+    if isinstance(raw, str) and len(raw) == 1 and raw in "1234567":
+        return int(raw)
+    return None
+
+
+def filter_cards(cards, monday, member, day):
+    """Keep cards of ``member`` (pk or "unassigned") and dated on weekday ``day``."""
+    if day is not None:
+        wanted = monday + (day - 1) * ONE_DAY
+        cards = [c for c in cards if c.date == wanted]
+    if member == UNASSIGNED_FILTER:
+        cards = [c for c in cards if c.member is None]
+    elif member is not None:
+        cards = [c for c in cards if c.member is not None and c.member.pk == member]
+    return list(cards)
+
+
+def dashboard_query(week=None, member=None, day=None):
+    """``?week=…&member=…&day=…`` from normalized values, defaults left out."""
+    parts = []
+    if week:
+        parts.append(f"week={week}")
+    if member is not None:
+        parts.append(f"member={member}")
+    if day is not None:
+        parts.append(f"day={day}")
+    return "?" + "&".join(parts) if parts else ""

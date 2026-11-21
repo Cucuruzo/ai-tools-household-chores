@@ -1,3 +1,5 @@
+import datetime
+
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Q
@@ -14,7 +16,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from . import dashboard as dash
 from .forms import ChoreForm, MemberForm, find_template
 from .models import Chore, ChoreOccurrence, Member
-from .profile import is_valid_pk, set_active_member
+from .profile import _parse_pk, is_valid_pk, set_active_member
 from .services import eligible_pool, materialize_week, project_occurrences
 
 
@@ -74,7 +76,7 @@ def _shown_occurrences():
     return ChoreOccurrence.objects.filter(chore__is_template=False)
 
 
-def _dashboard_context(monday, today, now):
+def _dashboard_context(monday, today, now, member_filter=None, day_filter=None):
     nav = dash.week_nav(monday, today)
     pools = _PoolCache()
     week = Q(date__gte=nav["monday"], date__lte=nav["sunday"])
@@ -85,14 +87,17 @@ def _dashboard_context(monday, today, now):
         rows = _shown_occurrences().filter(
             week | Q(status=ChoreOccurrence.Status.TODO, date__lt=nav["monday"])
         )
-        sections = dash.group_current_week(_stored_cards(rows, pools), today, now)
+        everything = _stored_cards(rows, pools)
+        # "No chores this week" is decided on the unfiltered week.
+        context["is_empty"] = not any(dash.group_current_week(everything, today, now).values())
+        shown = dash.filter_cards(everything, nav["monday"], member_filter, day_filter)
+        sections = dash.group_current_week(shown, today, now)
         context["sections"] = [
             ("overdue", "Overdue", sections["overdue"]),
             ("today", "Today", sections["today"]),
             ("upcoming", "Upcoming", sections["upcoming"]),
         ]
         context["done_earlier"] = sections["done_earlier"]
-        context["is_empty"] = not any(sections.values())
     else:
         cards = _stored_cards(_shown_occurrences().filter(week), pools)
         if nav["is_past"]:
@@ -100,9 +105,28 @@ def _dashboard_context(monday, today, now):
         else:
             projected = project_occurrences(nav["monday"], nav["sunday"], today=today)
             cards += _projected_cards(projected, pools)
-        context["cards"] = sorted(cards, key=dash.list_key)
         context["is_empty"] = not cards
+        shown = dash.filter_cards(cards, nav["monday"], member_filter, day_filter)
+        context["cards"] = sorted(shown, key=dash.list_key)
     return context
+
+
+def _filter_context(nav, member, day):
+    """Normalized filter values and every dashboard link that carries them."""
+    def url(week):
+        return reverse("dashboard") + dash.dashboard_query(week, member, day)
+
+    own_week = None if nav["is_current"] else dash.week_param(nav["monday"])
+    return {
+        "filter_member": "" if member is None else member,
+        "filter_day": day,
+        "filter_week": own_week,
+        "filter_days": [nav["monday"] + datetime.timedelta(days=i) for i in range(7)],
+        "previous_url": url(nav["previous"]) if nav["previous"] else None,
+        "next_url": url(nav["next"]) if nav["next"] else None,
+        "this_week_url": url(None),
+        "switcher_next": url(own_week),
+    }
 
 
 @require_GET
@@ -112,7 +136,12 @@ def dashboard(request):
     now = timezone.localtime()
     today = timezone.localdate(now)
     monday = dash.parse_week(request.GET.get("week")) or dash.monday_of(today)
-    context = _dashboard_context(monday, today, now)
+    member_filter = dash.parse_member_filter(request.GET.get("member"), _parse_pk)
+    if isinstance(member_filter, int) and not Member.objects.filter(pk=member_filter).exists():
+        member_filter = None
+    day_filter = dash.parse_day_filter(request.GET.get("day"))
+    context = _dashboard_context(monday, today, now, member_filter, day_filter)
+    context.update(_filter_context(context["nav"], member_filter, day_filter))
     partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
     template = "chores/_dashboard_list.html" if partial else "chores/dashboard.html"
     response = render(request, template, context)

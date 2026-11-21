@@ -9,8 +9,8 @@
     <ul>
       <li>
         {% if nav.previous %}
-          <a href="{{ dashboard_url }}?week={{ nav.previous }}" aria-label="Previous week"
-             hx-get="{{ dashboard_url }}?week={{ nav.previous }}"
+          <a href="{{ previous_url }}" aria-label="Previous week"
+             hx-get="{{ previous_url }}"
              hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">‹</a>
         {% endif %}
       </li>
@@ -19,18 +19,20 @@
     <ul>
       <li>
         {% if nav.next %}
-          <a href="{{ dashboard_url }}?week={{ nav.next }}" aria-label="Next week"
-             hx-get="{{ dashboard_url }}?week={{ nav.next }}"
+          <a href="{{ next_url }}" aria-label="Next week"
+             hx-get="{{ next_url }}"
              hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">›</a>
         {% endif %}
       </li>
     </ul>
   </nav>
   {% if not nav.is_current %}
-    <p><a id="this-week" href="{{ dashboard_url }}"
-          hx-get="{{ dashboard_url }}"
+    <p><a id="this-week" href="{{ this_week_url }}"
+          hx-get="{{ this_week_url }}"
           hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">This week</a></p>
   {% endif %}
+
+  {% include "chores/_dashboard_filters.html" %}
 
   {% if is_empty %}
     <section id="no-chores">
@@ -60,6 +62,8 @@
     <section id="section-week">
       {% for card in cards %}
         {% include "chores/_chore_card.html" %}
+      {% empty %}
+        <p class="nothing-here">Nothing here</p>
       {% endfor %}
     </section>
   {% endif %}
