@@ -76,8 +76,10 @@ On deletion: active chore occurrences assigned to this member become unassigned.
 | Field            | Type                                                     |
 |------------------|----------------------------------------------------------|
 | id               | AutoField (PK)                                           |
-| title            | CharField                                                |
+| title            | CharField (max_length=100)                               |
 | instructions     | TextField (blank, optional)                              |
+| start_date       | DateField (required) — due date of a one-off chore, first date of a recurring one |
+| due_time         | TimeField (nullable) — optional time of day              |
 | assignment_mode  | CharField (choices: `fixed`, `rotating`, `unassigned`)   |
 | eligibility      | CharField (choices: `kids`, `adults`, `everyone`, nullable) — only for `rotating` |
 | assigned_to      | ForeignKey(Member, nullable) — only for `fixed`          |

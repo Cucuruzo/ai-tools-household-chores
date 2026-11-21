@@ -1,0 +1,117 @@
+{% extends "chores/base.html" %}
+
+{% block title %}{% if chore %}Edit chore{% else %}New chore{% endif %} · Household Chores{% endblock %}
+
+{% block head %}
+<style>
+  [hidden] { display: none !important; }
+  .errorlist { color: var(--pico-del-color); list-style: none; padding: 0; margin: 0.25rem 0; }
+</style>
+<noscript>
+  {# Without JS nothing can toggle fields, so show them all; the server still clears unused values. #}
+  <style>.dynamic-field[hidden] { display: block !important; }</style>
+</noscript>
+{% endblock %}
+
+{% block content %}
+<section id="chore">
+  <h1>{% if chore %}Edit chore{% else %}New chore{% endif %}</h1>
+
+  {% for message in messages %}
+    <p class="message" role="status"><mark>{{ message }}</mark></p>
+  {% endfor %}
+
+  <form id="chore-form" method="post"
+        action="{% if chore %}{% url 'chore_edit' chore.pk %}{% else %}{% url 'chore_create' %}{% endif %}">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <label for="{{ form.title.id_for_label }}">Title</label>
+    {{ form.title }} {{ form.title.errors }}
+
+    <label for="{{ form.instructions.id_for_label }}">Instructions</label>
+    {{ form.instructions }} {{ form.instructions.errors }}
+
+    <div class="grid">
+      <div>
+        <label for="{{ form.start_date.id_for_label }}">Start date</label>
+        {{ form.start_date }} {{ form.start_date.errors }}
+      </div>
+      <div>
+        <label for="{{ form.due_time.id_for_label }}">Due time</label>
+        {{ form.due_time }} {{ form.due_time.errors }}
+      </div>
+    </div>
+
+    <label for="{{ form.assignment_mode.id_for_label }}">Assignment mode</label>
+    {{ form.assignment_mode }} {{ form.assignment_mode.errors }}
+
+    <div id="field-eligibility" class="dynamic-field"{% if not form.show_eligibility %} hidden{% endif %}>
+      <label for="{{ form.eligibility.id_for_label }}">Eligibility</label>
+      {{ form.eligibility }} {{ form.eligibility.errors }}
+    </div>
+
+    <div id="field-assigned-to" class="dynamic-field"{% if not form.show_assigned_to %} hidden{% endif %}>
+      <label for="{{ form.assigned_to.id_for_label }}">Assigned to</label>
+      {{ form.assigned_to }} {{ form.assigned_to.errors }}
+    </div>
+
+    <label for="{{ form.recurrence.id_for_label }}">Recurrence</label>
+    {{ form.recurrence }} {{ form.recurrence.errors }}
+
+    <div id="field-weekday" class="dynamic-field"{% if not form.show_weekday %} hidden{% endif %}>
+      <label for="id_recurrence_day_week">Recurrence day (day of the week)</label>
+      <select name="recurrence_day" id="id_recurrence_day_week">
+        {% for value, label, selected in form.weekday_options %}
+          <option value="{{ value }}"{% if selected %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      {% if form.show_weekday %}{{ form.recurrence_day.errors }}{% endif %}
+    </div>
+
+    <div id="field-monthday" class="dynamic-field"{% if not form.show_monthday %} hidden{% endif %}>
+      <label for="id_recurrence_day_month">Recurrence day (day of the month)</label>
+      <select name="recurrence_day" id="id_recurrence_day_month">
+        {% for value, label, selected in form.monthday_options %}
+          <option value="{{ value }}"{% if selected %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      {% if form.show_monthday %}{{ form.recurrence_day.errors }}{% endif %}
+    </div>
+
+    <label for="{{ form.points.id_for_label }}">Points</label>
+    {{ form.points }} {{ form.points.errors }}
+
+    <button type="submit">Save chore</button>
+  </form>
+</section>
+
+<script>
+  (function () {
+    var form = document.getElementById("chore-form");
+    function toggle(id, on) {
+      var el = document.getElementById(id);
+      el.hidden = !on;
+      // Disable hidden day selects so only one recurrence_day value is posted.
+      el.querySelectorAll("select").forEach(function (s) {
+        if (s.name === "recurrence_day") s.disabled = !on;
+      });
+    }
+    function sync() {
+      var mode = form.elements["assignment_mode"].value;
+      var rec = form.elements["recurrence"].value;
+      toggle("field-eligibility", mode === "rotating");
+      toggle("field-assigned-to", mode === "fixed");
+      toggle("field-weekday", rec === "weekly");
+      toggle("field-monthday", rec === "monthly");
+    }
+    // On load, keep the server-rendered visibility; just disable hidden day selects.
+    ["field-weekday", "field-monthday"].forEach(function (id) {
+      var el = document.getElementById(id);
+      toggle(id, !el.hidden);
+    });
+    form.elements["assignment_mode"].addEventListener("change", sync);
+    form.elements["recurrence"].addEventListener("change", sync);
+  })();
+</script>
+{% endblock %}

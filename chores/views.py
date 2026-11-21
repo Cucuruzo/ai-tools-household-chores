@@ -1,11 +1,12 @@
+from django.contrib import messages
 from django.db import transaction
 from django.http import Http404, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from .forms import MemberForm
-from .models import Member
+from .forms import ChoreForm, MemberForm
+from .models import Chore, Member
 from .profile import is_valid_pk, set_active_member
 
 
@@ -117,3 +118,27 @@ def profile_switch(request, pk):
     ):
         target = "/"
     return redirect(target)
+
+
+def _save_chore(request, chore=None):
+    data = request.POST if request.method == "POST" else None
+    form = ChoreForm(data, instance=chore)
+    if request.method == "POST" and form.is_valid():
+        chore = form.save()
+        messages.success(request, "Chore saved")
+        return redirect("chore_edit", pk=chore.pk)
+    return render(request, "chores/chore_form.html", {"form": form, "chore": chore})
+
+
+@require_http_methods(["GET", "POST"])
+def chore_create(request):
+    return _save_chore(request)
+
+
+@require_http_methods(["GET", "POST"])
+def chore_edit(request, pk):
+    if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
+        raise Http404("No such chore")
+    # Templates (is_template=True) are edited elsewhere (#6).
+    chore = get_object_or_404(Chore, pk=pk, is_template=False)
+    return _save_chore(request, chore)
