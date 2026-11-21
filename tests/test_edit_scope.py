@@ -457,7 +457,7 @@ def test_this_occurrence_ignores_other_fields(client):
     o = row(c, nov(20))
     chore_before = list(Chore.objects.filter(pk=c.pk).values())
     this(client, c, o, points="20", title="Hacked", recurrence="weekly", recurrence_day="1",
-         start_date="2030-01-01", date="2026-11-25", member="1")
+         start_date="2030-01-01", date="2026-11-20", member="1")
     assert list(Chore.objects.filter(pk=c.pk).values()) == chore_before
     after = values(o)
     assert (after["date"], after["points"], after["member_id"]) == (d(nov(20)), 20, None)

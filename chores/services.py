@@ -9,7 +9,7 @@ import datetime
 
 from django.db import IntegrityError, transaction
 from django.db.models import Max
-from django.utils import timezone
+from django.utils import dateformat, timezone
 
 from .models import Chore, ChoreOccurrence, Member, OccurrenceException, RotationState
 
@@ -732,3 +732,73 @@ def apply_one_off_edit(chore, old, today):
         return _one_off_edit_attempt(chore, old, today)
     except IntegrityError:
         return _one_off_edit_attempt(chore, old, today)
+
+
+# --- Moving one occurrence (#40) ----------------------------------------------------
+
+
+class MoveRefused(Exception):
+    """A "this occurrence only" date that is outside the limits.
+
+    ``str(error)`` is the message shown under the Date field.
+    """
+
+
+def _move_attempt(occurrence, target, due_time, points, title, instructions, today):
+    with transaction.atomic():
+        materialize_week(_monday_of(today), today=today)
+        chore = Chore.objects.select_for_update().filter(pk=occurrence.chore_id).first()
+        row = ChoreOccurrence.objects.select_for_update().filter(
+            pk=occurrence.pk, chore_id=occurrence.chore_id,
+            status=ChoreOccurrence.Status.TODO, is_cancelled=False,
+        ).first()
+        if chore is None or row is None:
+            transaction.set_rollback(True)  # nothing is written, materialization included
+            return False
+        if chore.end_date is not None and chore.end_date < today:
+            raise MoveRefused("This chore has ended, so this occurrence can't move.")
+        last = _monday_of(today) + 6 * ONE_DAY
+        if chore.end_date is not None:
+            last = min(last, chore.end_date)
+        if not today <= target <= last:
+            first, final = dateformat.format(today, "D j M"), dateformat.format(last, "D j M")
+            raise MoveRefused(f"Pick a day from {first} to {final}.")
+        if ChoreOccurrence.objects.filter(chore_id=chore.pk, date=target).exists():
+            taken = dateformat.format(target, "D j M")
+            raise MoveRefused(f"This chore already has an occurrence on {taken}.")
+        source = row.date
+        # The update comes first: it frees (chore, source) for the tombstone.
+        ChoreOccurrence.objects.filter(pk=row.pk).update(
+            date=target, due_time=due_time, points=points, title=title,
+            instructions=instructions, is_override=True,
+        )
+        ChoreOccurrence.objects.create(
+            chore_id=chore.pk, date=source, member_id=row.member_id,
+            due_time=row.due_time, points=row.points, title=row.title,
+            instructions=row.instructions, status=ChoreOccurrence.Status.TODO,
+            is_override=False, is_cancelled=True,
+        )
+        return True
+
+
+def move_occurrence(occurrence, target, due_time, points, title, instructions, today):
+    """"This occurrence only" with a new date (#40): move one todo row to ``target``.
+
+    ``today`` is the caller's local date; this never reads the clock. In one
+    transaction: the current week is materialized, the chore and then the row
+    (todo, not cancelled) are locked, and ``target`` must be in
+    ``[today, min(this Sunday, end_date)]`` with no row of this chore on it
+    (cancelled rows included); otherwise ``MoveRefused`` is raised and
+    nothing is written. One UPDATE sets the row's date, due time, points,
+    title, instructions and ``is_override=True`` (same pk, same member, no
+    rotation turn), then a cancelled todo tombstone is stored on the old
+    date with the row's old member, due time, points, title and
+    instructions. Returns False when the locked re-read finds no todo,
+    non-cancelled row (a lost race), True after the move. An
+    ``IntegrityError`` (a concurrent insert on the target or source date)
+    rolls the attempt back and it is retried once from a fresh read.
+    """
+    try:
+        return _move_attempt(occurrence, target, due_time, points, title, instructions, today)
+    except IntegrityError:
+        return _move_attempt(occurrence, target, due_time, points, title, instructions, today)
