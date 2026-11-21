@@ -757,21 +757,40 @@ def _toggle_allowed_from(action):
     return (ChoreOccurrence.Status.TODO,)
 
 
-def _toggle_success(request, pk):
-    """The swapped card block for HTMX, else the 302 back to the same view."""
+def _toggle_success(request, pk, chore_id):
+    """The swapped card block for HTMX, else the 302 back to the same view.
+
+    The block is followed by one out-of-band ``<article>`` (``card_only`` and
+    ``card_oob`` in ``_chore_card.html``) for each other stored card of the
+    chore that the posted dashboard view shows (#37), so a new streak reaches
+    them without a reload. Planned cards never show a streak and are skipped.
+    """
     if not _is_htmx(request):
         return _dashboard_redirect(request.POST)
     now = timezone.localtime()  # one clock read, viewer's zone (#26)
     today = timezone.localdate(now)
-    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache(), today=today)
-    if not cards:  # removed after the write
-        raise Http404("No such occurrence")
-    [card] = cards
-    card.overdue = dash.is_overdue(card, today, now)
     monday, member, day = _dashboard_filters(request.POST)
+    nav = dash.week_nav(monday or dash.monday_of(today), today)
+    visible = Q(date__gte=nav["monday"], date__lte=nav["sunday"])
+    if nav["is_current"]:
+        visible |= Q(status=ChoreOccurrence.Status.TODO, date__lt=nav["monday"])
+    rows = _shown_occurrences().filter(Q(pk=pk) | (Q(chore_id=chore_id) & visible))
+    cards = _stored_cards(rows, _PoolCache(), today=today)
+    for card in cards:
+        card.overdue = dash.is_overdue(card, today, now)
+    card = next((c for c in cards if c.pk == pk), None)
+    if card is None:  # removed after the write
+        raise Http404("No such occurrence")
+    siblings = dash.filter_cards([c for c in cards if c.pk != pk], nav["monday"], member, day)
     context = {"card": card}
-    context.update(_filter_context(dash.week_nav(monday or dash.monday_of(today), today), member, day))
-    return render(request, "chores/_chore_card.html", context)
+    context.update(_filter_context(nav, member, day))
+    response = render(request, "chores/_chore_card.html", context)
+    for sibling in sorted(siblings, key=dash.list_key):
+        response.content += render_to_string(
+            "chores/_chore_card.html",
+            {**context, "card": sibling, "card_only": True, "card_oob": True},
+        ).encode()
+    return response
 
 
 @require_POST
@@ -784,7 +803,7 @@ def occurrence_toggle(request, pk):
         return HttpResponseBadRequest("Unknown action")
     target = _TOGGLE_TARGET[action]
     if occurrence.status == target:
-        return _toggle_success(request, pk)  # repeat: nothing to write
+        return _toggle_success(request, pk, occurrence.chore_id)  # repeat: nothing to write
     if occurrence.status not in _toggle_allowed_from(action):
         return HttpResponseBadRequest("Undo first")
     credited = get_active_member(request) if action == "done" else None
@@ -795,7 +814,7 @@ def occurrence_toggle(request, pk):
             raise Http404("No such occurrence")
         if current.status != target:
             return HttpResponseBadRequest("Undo first")
-    return _toggle_success(request, pk)
+    return _toggle_success(request, pk, occurrence.chore_id)
 
 
 # --- Assign / reassign (#13) -------------------------------------------------------

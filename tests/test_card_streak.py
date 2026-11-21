@@ -63,7 +63,7 @@ def numbers(body):
 def swapped(client, pk, action, **kwargs):
     response = toggle(client, pk, action, htmx=True, **kwargs)
     assert response.status_code == 200
-    return shown(response.content.decode())
+    return shown(blocks(response.content.decode())[pk])
 
 
 # --- Shown -----------------------------------------------------------------------
@@ -202,14 +202,14 @@ def test_swapped_block_equals_full_page_block_with_a_streak(client):
     pk = rows[18].pk
     assert shown(blocks(page(client))[pk]) == 2
     for action, number in (("done", 3), ("undo", 2), ("skip", None), ("undo", 2)):
-        block = toggle(client, pk, action, htmx=True).content.decode()
+        block = blocks(toggle(client, pk, action, htmx=True).content.decode())[pk]
         full = blocks(page(client))[pk]
         assert blank_csrf(block).strip() == blank_csrf(full).strip(), action
         assert shown(block) == number, action
 
 
 @pytest.mark.django_db
-def test_only_the_swapped_card_updates(client):
+def test_a_reload_shows_the_new_number_on_other_cards(client):
     c, rows = standard()
     assert swapped(client, rows[18].pk, "done") == 4
     assert numbers(page(client))[rows[19].pk] == 4  # a reload refreshes the others
