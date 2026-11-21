@@ -20,10 +20,10 @@ from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
 from .services import (
-    ASSIGNMENT_FIELDS, RULE_FIELDS, MoveRefused, OneOffEditRefused, apply_future_edit,
+    ASSIGNMENT_FIELDS, RULE_FIELDS, MoveRefused, OneOffEditRefused, _day_text, apply_future_edit,
     apply_one_off_edit, cancel_projected_date, eligible_pool, materialize_one_off,
-    materialize_week, move_occurrence, project_occurrences, projected_occurrence,
-    set_occurrence_status, set_projected_member, update_occurrence,
+    materialize_week, move_occurrence, move_projected_date, project_occurrences,
+    projected_occurrence, set_occurrence_status, set_projected_member, update_occurrence,
 )
 
 
@@ -89,7 +89,7 @@ def _projected_cards(projected, pools):
             due_time=p["due_time"], points=p["points"], status=dash.PLANNED, member=member,
             assignee_note=_note(pools, chore, p["assignment_mode"], member, p["is_override"]),
             recurring=chore.recurrence != Chore.Recurrence.ONCE,
-            instructions=chore.instructions,
+            instructions=p["instructions"],
         ))
     return cards
 
@@ -614,6 +614,11 @@ def _scope_context(occurrence, today):
     return context
 
 
+def _moved_message(day, today):
+    """"Occurrence moved to Sat 5 Dec", with the year when it is not today's (#48)."""
+    return f"Occurrence moved to {_day_text(day, today)}"
+
+
 def _save_occurrence(request, chore, occurrence, filters, scope):
     """"This occurrence only" (#20, #39): due time, points, title and instructions of one todo row.
 
@@ -647,7 +652,11 @@ def _save_occurrence(request, chore, occurrence, filters, scope):
         if current.status != ChoreOccurrence.Status.TODO:
             return HttpResponseBadRequest("Undo first")
     if moving:
-        messages.success(request, f"Occurrence moved to {data['date']:%a} {data['date'].day} {data['date']:%b}")
+        today = scope["scope_today"]
+        messages.success(request, _moved_message(data["date"], today))
+        if data["date"] > dash.monday_of(today) + datetime.timedelta(days=6):
+            # A later week (#48): the row is now cancelled, so no occurrence=.
+            return _edit_redirect(chore.pk, filters)
     else:
         messages.success(request, "Occurrence saved")
     return _edit_redirect(chore.pk, filters, occurrence)
@@ -1055,3 +1064,44 @@ def planned_assign(request, chore_id):
         if projected["member_id"] != member_id:
             set_projected_member(chore, day, member_id)
     return _planned_assign_response(request, chore, day, today, now)
+
+
+# --- Move a projected date (#48) ---------------------------------------------------
+
+
+@require_POST
+def planned_move(request, chore_id):
+    """Move one projected date ``date`` of a recurring chore to ``target`` in
+    a later week (#48). A plain POST that returns to the posted dashboard
+    view; a refused target is a message there and writes nothing.
+
+    ``date`` must be a projected date after this Sunday for the viewer's
+    ``today`` (#26), read once and also passed to ``move_projected_date``.
+    """
+    if not is_valid_pk(chore_id):  # out-of-range ids would overflow the DB query
+        raise Http404("No such chore")
+    chore = get_object_or_404(Chore, pk=chore_id, is_template=False)
+    if chore.recurrence == Chore.Recurrence.ONCE:
+        return HttpResponseBadRequest("Move a one-off chore by editing its date")
+    day = month.parse_date(request.POST.get("date"))
+    if day is None:
+        return HttpResponseBadRequest("Invalid date")
+    today = timezone.localdate()
+    if day <= dash.monday_of(today) + datetime.timedelta(days=6) \
+            or projected_occurrence(chore, day, today) is None:
+        raise Http404("Not a planned date of this chore")
+    target = month.parse_date(request.POST.get("target"))
+    if target is None:
+        messages.error(request, "Enter a valid date.")
+        return _dashboard_redirect(request.POST)
+    if target == day:
+        return _dashboard_redirect(request.POST)
+    try:
+        moved = move_projected_date(chore, day, target, today)
+    except MoveRefused as refused:  # nothing was written
+        messages.error(request, str(refused))
+        return _dashboard_redirect(request.POST)
+    if not moved:  # lost a race: no longer a planned date
+        raise Http404("Not a planned date of this chore")
+    messages.success(request, _moved_message(target, today))
+    return _dashboard_redirect(request.POST)

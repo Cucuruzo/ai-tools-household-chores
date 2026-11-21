@@ -146,6 +146,11 @@ columns later.
 | is_cancelled | BooleanField (default False): the date is not shown, and is stored with `is_cancelled=True` when the week is materialized. Written by "This occurrence only" on a Planned card (#22, `services.cancel_projected_date`); an override on the same row stays but no longer matters |
 | is_override  | BooleanField (default False): `member` replaces the projected member |
 | member       | ForeignKey(Member, nullable, on_delete=SET_NULL): None means Unassigned, so deleting the member leaves an override to Unassigned |
+| moved_from   | DateField (nullable): set only on an **extra** (#48), a date moved into a later week. It is the date the occurrence was first moved from |
+| title        | CharField(100, blank, default ""): read only on an extra, its own title |
+| instructions | TextField (blank, default ""): read only on an extra, its own instructions |
+| due_time     | TimeField (nullable): read only on an extra, its own due time |
+| points       | IntegerField (nullable): read only on an extra, its own points |
 
 **Unique constraint:** (chore, date), `unique_exception_per_chore_date`
 
@@ -207,11 +212,22 @@ edits an existing row.
   is left out, and an override date gets the exception's member and
   `is_override=True` (a key on every projected dict). Window and turn counting
   do not change, so the query count stays constant.
+- An **extra** (`moved_from` set, #48) is returned with its own title,
+  instructions, due time, points and member, and `is_override=True`. Off
+  the rule it **takes no turn** and is returned when
+  `max(start, current Monday, latest stored row + 1 day) <= T <= min(end,
+  end_date)` (`start_date` does not limit it). On a rule date (only after a
+  later rule change) it replaces that date, which keeps its turn. A
+  cancelled extra is not returned; for a one-off chore `moved_from` is
+  ignored. Every projected dict has an `instructions` key: the chore's, or
+  the extra's own (Planned cards show it).
 - They are **consumed at materialization**: `materialize_week` stores an
   override as a row with that member and `is_override=True`, and a cancelled
   date as a row with `is_cancelled=True`. Each one still calls
-  `advance_rotation`. Then every exception dated on or before that Sunday is
-  deleted in the same transaction.
+  `advance_rotation`. An extra is stored by `_store_extra`: a todo row with
+  its own values and `is_override=True`, taking a turn only on a rule date
+  (a cancelled extra off the rule stores nothing). Then every exception
+  dated on or before that Sunday is deleted in the same transaction.
 - `services.projected_occurrence(chore, day, today)` is the only way views
   decide "D is a projected date of this chore".
 
@@ -276,7 +292,9 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   current title. After a recurrence change, older rows still count in
   the same streak (6 daily `done` rows and 1 weekly `done` row show 7 in a
   row). Stored cards and history show the row's own instructions, and Planned
-  cards the chore's current ones (#47).
+  cards the chore's current ones (#47). An extra (#48) keeps its member,
+  title, instructions, due time and points through later edits: "this and
+  future" never writes exceptions.
 
 ## Moving one occurrence (#40)
 
@@ -293,8 +311,8 @@ An empty or unchanged date is the #39 save above. Any other date calls
   cancelled todo row with the row's old member, due time, points, title
   and instructions. The UPDATE comes first because it frees `(chore, S)`.
 - **Limits** (`MoveRefused`, a form error under Date, status 200, nothing
-  written): the target must be in `[today, min(this Sunday, end_date)]`
-  ("Pick a day from Wed 18 Nov to Sun 22 Nov."; an `end_date` before today
+  written): the target must be in `[today, min(31 Dec 2099, end_date)]`
+  ("Pick a day from Wed 18 Nov to Thu 31 Dec 2099."; an `end_date` before today
   gives "This chore has ended, so this occurrence can't move.") and must
   have no row of this chore, cancelled included ("This chore already has
   an occurrence on Thu 19 Nov."). The source can be any date, including an
@@ -309,8 +327,36 @@ An empty or unchanged date is the #39 save above. Any other date calls
 - An `IntegrityError` (a concurrent insert) rolls the attempt back and it
   is retried once from a fresh read. `today` is the viewer's local date,
   read once by the view (`scope_today`).
-- Out of scope: moves into a later week or of projected dates (#48), and
-  moving back onto a date the occurrence left (#49).
+- A target after this Sunday is
+  [Moving into a later week (#48)](#moving-into-a-later-week-48).
+- Out of scope: moving back onto a date the occurrence left (#49).
+
+## Moving into a later week (#48)
+
+A future week has no rows, so a move into it is a pair of exceptions: a
+cancel on the source date S and an **extra** on the target date T
+(`moved_from` set, `is_override=True`, its own title, instructions, due
+time and points, and the member S showed at move time, frozen). The extra
+takes no rotation turn; S keeps its turn (rule 7).
+
+- **Planned date** (`POST /dashboard/move/planned/<id>/`,
+  `services.move_projected_date`): S must be a projected date after this
+  Sunday (else 404), and T in `[next Monday, min(end_date, 31 Dec 2099)]`.
+  S gets `is_cancelled=True` as `cancel_projected_date` writes it, and the
+  extra copies S's projected values. If S is itself an extra, that row only
+  gets `date=T`, and `moved_from` stays. A one-off chore is a 400.
+- **Stored row** (edit page, "This occurrence only", T after this Sunday):
+  the row keeps its pk, date and values and only gets `is_cancelled=True`
+  (it is its own tombstone). The extra has `moved_from=S`, the row's member
+  and the posted values. The edit page redirect has no `occurrence=`.
+- **Taken**: T is refused when the chore has a row, any exception or a
+  projected date on T ("This chore already has an occurrence on Thu 26
+  Nov."). Dates in messages are `D j M`, plus ` Y` outside today's year.
+- What the future week shows is what is stored when it becomes current.
+  Nothing writes `RotationState` or a `ChoreOccurrence`; an `IntegrityError`
+  rolls the attempt back and it is retried once.
+- Out of scope: into the current week or back onto the source (#51), onto a
+  date with another exception (#53).
 
 ## Editing a one-off (#35)
 
@@ -386,6 +432,7 @@ the chore row still exists after the delete:
 /dashboard/toggle/<id>/            POST   mark done / undo / skip
 /dashboard/assign/<id>/            POST   assign or reassign occurrence
 /dashboard/assign/planned/<id>/    POST   assign a projected date of chore <id> (fields `date`, `assignee`; #31)
+/dashboard/move/planned/<id>/  POST  move a projected date of chore <id> (fields date, target; #48)
 
 /calendar/                         GET    monthly calendar (default: this month)
 /calendar/?month=2026-09           GET    calendar for a specific month

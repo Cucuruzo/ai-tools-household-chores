@@ -147,7 +147,9 @@ class OccurrenceException(models.Model):
     Applied on read by projection and consumed by ``materialize_week``. A
     stored row on the same date always wins; an exception on a date that is
     not on the chore's rule is ignored. Either kind still takes its rotation
-    turn (rotation rule 7).
+    turn (rotation rule 7). An "extra" (``moved_from`` set, #48) is a date
+    moved into a later week: an override with its own title, instructions,
+    due time and points that takes no rotation turn.
     """
 
     chore = models.ForeignKey(Chore, on_delete=models.CASCADE, related_name="exceptions")
@@ -158,6 +160,13 @@ class OccurrenceException(models.Model):
     member = models.ForeignKey(
         Member, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
+    # Set only on an extra (#48): the date the occurrence was first moved from.
+    moved_from = models.DateField(null=True, blank=True)
+    # Read only on an extra: its own values, a snapshot like a stored row's (#39).
+    title = models.CharField(max_length=100, blank=True, default="")
+    instructions = models.TextField(blank=True, default="")
+    due_time = models.TimeField(null=True, blank=True)
+    points = models.IntegerField(null=True, blank=True)
 
     class Meta:
         constraints = [

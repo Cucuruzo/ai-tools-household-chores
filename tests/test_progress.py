@@ -711,12 +711,12 @@ def test_progress_module_does_not_read_the_clock():
         assert forbidden not in source
 
 
-def test_only_0009_and_0010_after_0008():
+def test_only_0009_0010_and_0011_after_0008():
     from pathlib import Path
 
     names = sorted(p.name for p in Path(progress.__file__).parent.joinpath("migrations").glob("0*.py"))
     assert "0008_choreoccurrence_completed_by.py" in names
-    assert names[names.index("0008_choreoccurrence_completed_by.py") + 1:] == ["0009_occurrenceexception.py", "0010_choreoccurrence_title_instructions.py"]
+    assert names[names.index("0008_choreoccurrence_completed_by.py") + 1:] == ["0009_occurrenceexception.py", "0010_choreoccurrence_title_instructions.py", "0011_occurrenceexception_extra.py"]
 
 
 @pytest.mark.django_db

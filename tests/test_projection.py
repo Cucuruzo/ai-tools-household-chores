@@ -13,7 +13,7 @@ from chores.models import Chore, ChoreOccurrence, Member, RotationState
 from chores.services import advance_rotation, next_member, project_occurrences
 
 WRITE_SQL = re.compile(r"^\s*(INSERT|UPDATE|DELETE|REPLACE)\b", re.I)
-KEYS = {"chore_id", "title", "date", "due_time", "member_id", "points", "assignment_mode", "is_override"}
+KEYS = {"chore_id", "title", "instructions", "date", "due_time", "member_id", "points", "assignment_mode", "is_override"}
 
 
 def d(text):
@@ -130,7 +130,7 @@ def test_output_keys_and_values():
     [occ] = project("2026-11-16", "2026-11-22", "2026-11-16")
     assert set(occ) == KEYS
     assert occ == {
-        "chore_id": c.pk, "title": "Trash", "date": d("2026-11-18"),
+        "chore_id": c.pk, "title": "Trash", "instructions": "", "date": d("2026-11-18"),
         "due_time": datetime.time(7, 30), "member_id": ann.pk, "points": 20,
         "assignment_mode": "fixed", "is_override": False,
     }

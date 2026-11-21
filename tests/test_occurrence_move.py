@@ -304,21 +304,21 @@ def test_daily_chore_refuses_without_a_stored_week(client, family):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("target", ["2026-11-17", "2026-11-23", "2026-11-25", "9999-12-31",
+@pytest.mark.parametrize("target", ["2026-11-17", "2026-11-16", "2100-01-01", "9999-12-31",
                                     "2026-11-01", "0001-01-01"])
-def test_outside_the_week_is_refused(client, family, target):
+def test_outside_the_range_is_refused(client, family, target):
     c, o = bins()
     before = snapshot()
     response = move(client, c, o, target, title="Changed", instructions="new", points=20)
     assert response.status_code == 200
-    assert date_errors(response) == ["Pick a day from Wed 18 Nov to Sun 22 Nov."]
+    assert date_errors(response) == ["Pick a day from Wed 18 Nov to Thu 31 Dec 2099."]
     assert snapshot() == before
     text = response.content.decode()
     form = OCC_FORM.search(text).group(1)
     assert 'value="Changed"' in form and ">\nnew</textarea>" in form
     assert '<option value="20" selected>' in form
     assert f'value="{target}"' in form
-    assert "Pick a day from Wed 18 Nov to Sun 22 Nov." in form
+    assert "Pick a day from Wed 18 Nov to Thu 31 Dec 2099." in form
     chore_form = CHORE_FORM.search(text).group(1)
     assert 'value="Bins"' in chore_form
 
@@ -326,7 +326,7 @@ def test_outside_the_week_is_refused(client, family, target):
 @pytest.mark.django_db
 def test_error_is_under_the_date_field(client, family):
     c, o = bins()
-    form = OCC_FORM.search(move(client, c, o, "2026-11-23").content.decode()).group(1)
+    form = OCC_FORM.search(move(client, c, o, "2026-11-17").content.decode()).group(1)
     assert form.index('id="occ_date"') < form.index('class="errorlist"') < form.index(
         '<button type="submit" name="scope" value="this">')
 
@@ -397,8 +397,8 @@ def test_last_repeated_date_counts(client, family):
     assert response.status_code == 302
     assert values(o)["date"] == d(nov(21))
     o2 = ChoreOccurrence.objects.get(pk=o.pk)
-    response = move(client, c, o2, ["2026-11-22", "2026-11-30"])
-    assert date_errors(response) == ["Pick a day from Wed 18 Nov to Sun 22 Nov."]
+    response = move(client, c, o2, ["2026-11-22", "2026-11-17"])
+    assert date_errors(response) == ["Pick a day from Wed 18 Nov to Thu 31 Dec 2099."]
 
 
 @pytest.mark.django_db
@@ -691,7 +691,7 @@ def test_kiritimati_viewers_today_limits_the_move(client, family):
     c, o = bins()
     # 12:00 UTC on Wed 18 is Thu 19 02:00 in Kiritimati.
     response = move(client, c, o, "2026-11-18", tz="Pacific/Kiritimati")
-    assert date_errors(response) == ["Pick a day from Thu 19 Nov to Sun 22 Nov."]
+    assert date_errors(response) == ["Pick a day from Thu 19 Nov to Thu 31 Dec 2099."]
     assert values(o)["date"] == d(nov(19))
     client.cookies.pop("tz")
     assert move(client, c, o, "2026-11-18").status_code == 302
@@ -710,8 +710,8 @@ def test_kiritimati_sunday_is_already_next_week(client, family):
     assert rows[24].pk == o.pk and rows[19].is_cancelled and rows[26].member_id == leo.pk
     c2 = weekly("Lawn", 2, "2026-11-01")
     o2 = row(c2, nov(18))
-    utc = move(client, c2, o2, "2026-11-24", when=SUN_NOON, tz="UTC")
-    assert date_errors(utc) == ["Pick a day from Sun 22 Nov to Sun 22 Nov."]
+    utc = move(client, c2, o2, "2026-11-21", when=SUN_NOON, tz="UTC")
+    assert date_errors(utc) == ["Pick a day from Sun 22 Nov to Thu 31 Dec 2099."]
 
 
 @pytest.mark.django_db

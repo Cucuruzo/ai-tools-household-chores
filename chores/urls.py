@@ -15,6 +15,7 @@ urlpatterns = [
     path('dashboard/toggle/<int:pk>/', views.occurrence_toggle, name='occurrence_toggle'),
     path('dashboard/assign/<int:pk>/', views.occurrence_assign, name='occurrence_assign'),
     path('dashboard/assign/planned/<int:chore_id>/', views.planned_assign, name='planned_assign'),
+    path('dashboard/move/planned/<int:chore_id>/', views.planned_move, name='planned_move'),
     path('chores/create/', views.chore_create, name='chore_create'),
     path('chores/<int:pk>/edit/', views.chore_edit, name='chore_edit'),
     path('chores/undo-delete/', views.chore_delete_undo, name='chore_delete_undo'),

@@ -246,7 +246,7 @@ GET_PAGES = {
 }
 POST_ONLY = {
     "member_add", "member_edit", "member_move", "member_delete", "occurrence_toggle",
-    "occurrence_assign", "planned_assign", "chore_delete", "template_delete", "profile_switch",
+    "occurrence_assign", "planned_assign", "planned_move", "chore_delete", "template_delete", "profile_switch",
     "chore_delete_undo",
 }
 REDIRECTS = {"home"}
