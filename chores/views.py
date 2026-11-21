@@ -600,7 +600,9 @@ def _assign_response(request, pk):
     monday, member, day = _dashboard_filters(request.POST)
     monday = monday or dash.monday_of(today)
     if member is None or dash.filter_cards([card], monday, member, None):
-        return render(request, "chores/_chore_card.html", {"card": card, "card_only": True})
+        context = {"card": card, "card_only": True}
+        context.update(_filter_context(dash.week_nav(monday, today), member, day))
+        return render(request, "chores/_chore_card.html", context)
     context = _dashboard_context(monday, today, now, member, day)
     context.update(_filter_context(context["nav"], member, day))
     response = render(request, "chores/_dashboard_list.html", context)

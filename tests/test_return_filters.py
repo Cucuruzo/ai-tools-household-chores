@@ -272,3 +272,17 @@ def test_template_edit_has_no_back_link_or_inputs(client):
     body = client.get(f"/chores/templates/{t.pk}/edit/?week=2026-W46&member=unassigned").content.decode()
     assert "back-to-dashboard" not in body
     assert hidden(FORM.search(body).group(1)) == {}
+
+
+@pytest.mark.django_db
+def test_assign_swap_has_the_same_link_as_a_fresh_load_with_filters(client):
+    m = one_member()
+    o = occ("Dishes", "2026-11-12", member=m)
+    data = {"week": "2026-W46", "member": str(m.pk), "day": "4"}
+    with at(WED):
+        response = client.post(
+            f"/dashboard/assign/{o.pk}/", {**data, "assignee": str(m.pk)}, **HTMX)
+    assert response.status_code == 200
+    fresh = page(client, week="2026-W46", data={"member": m.pk, "day": "4"})
+    assert link_of(response.content.decode()) == link_of(fresh)
+    assert link_of(fresh) == f"/chores/{o.chore_id}/edit/?" + FULL.format(m=m.pk)
