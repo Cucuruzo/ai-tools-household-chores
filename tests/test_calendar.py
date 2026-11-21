@@ -507,7 +507,7 @@ def test_dot_order_is_due_time_title_then_chore_id(client):
 def test_empty_month_message(client):
     body = page(client, "2026-10")
     assert "<table>" in body and "No chores this month" in body
-    assert 'href="/chores/create/">Add a chore' in body
+    assert 'href="/chores/create/?return_to=calendar&amp;month=2026-10">Add a chore' in body
     chore("Dishes")
     assert "No chores this month" not in page(client)
 

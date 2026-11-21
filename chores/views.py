@@ -298,7 +298,7 @@ def _calendar_context(first, today):
         "previous_url": _month_url(month.shift_month(first, -1), today) if nav["previous"] else None,
         "next_url": _month_url(month.shift_month(first, 1), today) if nav["next"] else None,
         "this_month_url": reverse("calendar"),
-        "create_url": create_url,
+        "create_url": create_url + "?" + add_suffix[1:],
         "switcher_next": _month_url(first, today),
     }
 
