@@ -7,7 +7,7 @@ state and get the same sequence that materialization (#9) will store.
 import calendar
 import datetime
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
 
@@ -89,6 +89,11 @@ def advance_rotation(chore):
 # --- Projection (#8) ---------------------------------------------------------
 
 
+def _resolve_today(today):
+    """The only clock read in this module: ``today`` or the local date."""
+    return timezone.localdate() if today is None else today
+
+
 def _monday_of(day):
     return day - datetime.timedelta(days=day.weekday())
 
@@ -159,8 +164,7 @@ def project_occurrences(start, end, today=None):
     """
     if end < start:
         return []
-    if today is None:
-        today = timezone.localdate()
+    today = _resolve_today(today)
 
     latest = dict(
         ChoreOccurrence.objects.values("chore_id")
@@ -202,3 +206,58 @@ def project_occurrences(start, end, today=None):
                 })
     results.sort(key=lambda o: (o["date"], o["title"], o["chore_id"]))
     return results
+
+
+# --- Materialization (#9) ----------------------------------------------------
+
+
+def create_occurrence(chore, day):
+    """Store one occurrence of ``chore`` on ``day`` with the right member.
+
+    The member comes from ``advance_rotation``, which takes (and stores) one
+    rotation turn for rotating chores and returns the fixed assignee or None
+    otherwise. ``due_time`` and ``points`` are copied from the chore now.
+    Raises ``IntegrityError`` if ``(chore, day)`` is already stored; the
+    caller's ``atomic`` block then also rolls back the turn.
+    """
+    member = advance_rotation(chore)
+    return ChoreOccurrence.objects.create(
+        chore=chore,
+        date=day,
+        member=member,
+        due_time=chore.due_time,
+        points=chore.points,
+        status=ChoreOccurrence.Status.TODO,
+        is_override=False,
+    )
+
+
+def _materialize_attempt(week_start, today):
+    with transaction.atomic():
+        projected = project_occurrences(week_start, week_start + 6 * ONE_DAY, today=today)
+        chores = Chore.objects.select_related("assigned_to").in_bulk(
+            {o["chore_id"] for o in projected}
+        )
+        # Projection is sorted by date first, so each rotating chore takes
+        # its turns in date order.
+        return [create_occurrence(chores[o["chore_id"]], o["date"]) for o in projected]
+
+
+def materialize_week(week_start, today=None):
+    """Store the current week's projected occurrences and return the new rows.
+
+    Only the current week (the Monday of ``today``'s week) may be
+    materialized. Existing rows are never touched: projection already skips
+    them. A concurrent run that stores a row first makes an insert hit the
+    unique ``(chore, date)`` constraint; the attempt is rolled back (rotation
+    turns included) and retried once from a fresh projection.
+    """
+    today = _resolve_today(today)
+    if week_start.weekday() != 0:
+        raise ValueError(f"week_start {week_start} is not a Monday")
+    if week_start != _monday_of(today):
+        raise ValueError(f"week_start {week_start} is not the current Monday")
+    try:
+        return _materialize_attempt(week_start, today)
+    except IntegrityError:
+        return _materialize_attempt(week_start, today)
