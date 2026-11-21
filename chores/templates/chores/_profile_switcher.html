@@ -1,0 +1,28 @@
+<nav id="profile-switcher" aria-label="Profile switcher">
+  {% if members %}
+    <ul>
+      {% if not active_member %}
+        <li id="who-are-you">Who are you?</li>
+      {% endif %}
+      {% for member in members %}
+        <li>
+          <form method="post" action="{% url 'profile_switch' member.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            {% if active_member and member.pk == active_member.pk %}
+              <button type="submit" class="profile active" aria-current="true">
+                <span class="avatar">{{ member.avatar }}</span> <strong>{{ member.name }}</strong>
+              </button>
+            {% else %}
+              <button type="submit" class="profile outline secondary">
+                <span class="avatar">{{ member.avatar }}</span> {{ member.name }}
+              </button>
+            {% endif %}
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <ul><li><a href="{% url 'family' %}">Add your family</a></li></ul>
+  {% endif %}
+</nav>

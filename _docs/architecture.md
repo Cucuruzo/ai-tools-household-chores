@@ -179,6 +179,8 @@ are never scheduled directly.
 /family/<id>/move/?dir=up|down     POST   move member up/down in rotation order
 /family/<id>/delete/               POST   remove member
 
+/profile/<id>/                     POST   switch active member
+
 /contribution/                     GET    contribution / progress view
 /contribution/?period=week         GET    this week's contribution
 /contribution/?period=month        GET    this month's contribution

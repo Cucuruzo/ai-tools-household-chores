@@ -1,10 +1,12 @@
 from django.db import transaction
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import MemberForm
 from .models import Member
+from .profile import set_active_member
 
 
 def home(request):
@@ -101,3 +103,15 @@ def member_delete(request, pk):
     if not _is_htmx(request):
         return redirect("family")
     return _render_family(request)
+
+
+@require_POST
+def profile_switch(request, pk):
+    member = get_object_or_404(Member, pk=pk)
+    set_active_member(request, member)
+    target = request.POST.get("next") or request.headers.get("Referer")
+    if not target or not url_has_allowed_host_and_scheme(
+        target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        target = "/"
+    return redirect(target)
