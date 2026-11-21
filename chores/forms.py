@@ -249,6 +249,10 @@ class OccurrenceForm(forms.Form):
         widget=forms.TimeInput(format="%H:%M", attrs={"type": "time"}),
     )
     points = forms.TypedChoiceField(choices=Chore.POINTS_CHOICES, coerce=int, label="Points")
+    date = forms.DateField(
+        required=False, label="Date",
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+    )
 
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("auto_id", "occ_%s")
@@ -259,6 +263,7 @@ class OccurrenceForm(forms.Form):
         return cls(initial={
             "title": occurrence.title, "instructions": occurrence.instructions,
             "due_time": occurrence.due_time, "points": occurrence.points,
+            "date": occurrence.date,
         })
 
 

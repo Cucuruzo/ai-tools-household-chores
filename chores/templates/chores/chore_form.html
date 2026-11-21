@@ -52,6 +52,8 @@
           {{ occurrence_form.points }} {{ occurrence_form.points.errors }}
         </div>
       </div>
+      <label for="occ_date">Date</label>
+      {{ occurrence_form.date }} {{ occurrence_form.date.errors }}
       <button type="submit" name="scope" value="this">Save this occurrence</button>
     </form>
     {% else %}

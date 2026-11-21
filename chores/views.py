@@ -19,10 +19,10 @@ from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
 from .services import (
-    ASSIGNMENT_FIELDS, RULE_FIELDS, OneOffEditRefused, apply_future_edit, apply_one_off_edit,
-    cancel_projected_date, eligible_pool, materialize_one_off, materialize_week,
-    project_occurrences, projected_occurrence, set_occurrence_status, set_projected_member,
-    update_occurrence,
+    ASSIGNMENT_FIELDS, RULE_FIELDS, MoveRefused, OneOffEditRefused, apply_future_edit,
+    apply_one_off_edit, cancel_projected_date, eligible_pool, materialize_one_off,
+    materialize_week, move_occurrence, project_occurrences, projected_occurrence,
+    set_occurrence_status, set_projected_member, update_occurrence,
 )
 
 
@@ -607,7 +607,9 @@ def _scope_context(occurrence, today):
 
 
 def _save_occurrence(request, chore, occurrence, filters, scope):
-    """"This occurrence only" (#20, #39): due time, points, title and instructions of one todo row."""
+    """"This occurrence only" (#20, #39): due time, points, title and instructions of one todo row.
+
+    A new ``date`` moves the row within the current week instead (#40)."""
     if occurrence is None:
         return HttpResponseBadRequest("Choose an occurrence")
     if occurrence.status != ChoreOccurrence.Status.TODO:
@@ -617,15 +619,29 @@ def _save_occurrence(request, chore, occurrence, filters, scope):
         scope["occurrence_form"] = form
         return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters, scope=scope)
     data = form.cleaned_data
-    if not update_occurrence(occurrence, data["due_time"], data["points"],
-                             data["title"], data["instructions"]):
+    moving = data["date"] is not None and data["date"] != occurrence.date
+    if moving:  # #40: a new date in the current week
+        try:
+            saved = move_occurrence(occurrence, data["date"], data["due_time"], data["points"],
+                                    data["title"], data["instructions"], scope["scope_today"])
+        except MoveRefused as refused:  # nothing was written
+            form.add_error("date", str(refused))
+            scope["occurrence_form"] = form
+            return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters, scope=scope)
+    else:
+        saved = update_occurrence(occurrence, data["due_time"], data["points"],
+                                  data["title"], data["instructions"])
+    if not saved:
         # Lost a race: the row changed after it was read.
         current = ChoreOccurrence.objects.filter(pk=occurrence.pk, chore=chore, is_cancelled=False).first()
         if current is None:
             raise Http404("No such occurrence")
         if current.status != ChoreOccurrence.Status.TODO:
             return HttpResponseBadRequest("Undo first")
-    messages.success(request, "Occurrence saved")
+    if moving:
+        messages.success(request, f"Occurrence moved to {data['date']:%a} {data['date'].day} {data['date']:%b}")
+    else:
+        messages.success(request, "Occurrence saved")
     return _edit_redirect(chore.pk, filters, occurrence)
 
 

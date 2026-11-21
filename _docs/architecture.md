@@ -229,7 +229,8 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   conditional UPDATE that also sets `is_override=True`
   (`services.update_occurrence`, #39). Equal values write nothing. Done /
   skipped rows need an Undo first (400). The member is changed on the card
-  (#13); the date is #40.
+  (#13); a new date moves the row (see
+  [Moving one occurrence (#40)](#moving-one-occurrence-40)).
 - **This and future** (`scope=future`, `services.apply_future_edit`), in one
   transaction:
   - every form field is saved on the chore; `end_date`, `template_source`,
@@ -271,6 +272,40 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   current title. After a recurrence change, older rows still count in
   the same streak (6 daily `done` rows and 1 weekly `done` row show 7 in a
   row).
+
+## Moving one occurrence (#40)
+
+"This occurrence only" has a Date field (the row's date, no `min`/`max`).
+An empty or unchanged date is the #39 save above. Any other date calls
+`services.move_occurrence` instead of `update_occurrence`:
+
+- **One transaction**, in order: `materialize_week(current Monday, today)`,
+  so every rule date of the week that can still happen has a row; a lock
+  on the chore, then on the row (todo, not cancelled; else a lost race:
+  nothing is written, 404 or 400 "Undo first"); the limit checks; one
+  UPDATE of the row (`date`, `due_time`, `points`, `title`, `instructions`,
+  `is_override=True`, same pk); then a **tombstone** on the old date: a
+  cancelled todo row with the row's old member, due time, points, title
+  and instructions. The UPDATE comes first because it frees `(chore, S)`.
+- **Limits** (`MoveRefused`, a form error under Date, status 200, nothing
+  written): the target must be in `[today, min(this Sunday, end_date)]`
+  ("Pick a day from Wed 18 Nov to Sun 22 Nov."; an `end_date` before today
+  gives "This chore has ended, so this occurrence can't move.") and must
+  have no row of this chore, cancelled included ("This chore already has
+  an occurrence on Thu 19 Nov."). The source can be any date, including an
+  overdue row from an earlier week. A daily chore is always refused.
+- **Rotation**: the date keeps its turn and member; `advance_rotation` is
+  not called and `RotationState` is not written.
+- The tombstone is shown nowhere and is never projected or materialized
+  again, so the projection window never moves back before the source.
+  The moved row is an override, so "this and future" never touches it.
+  Streaks, history, contribution and the calendar count it on its new
+  date only.
+- An `IntegrityError` (a concurrent insert) rolls the attempt back and it
+  is retried once from a fresh read. `today` is the viewer's local date,
+  read once by the view (`scope_today`).
+- Out of scope: moves into a later week or of projected dates (#48), and
+  moving back onto a date the occurrence left (#49).
 
 ## Editing a one-off (#35)
 
