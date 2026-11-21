@@ -195,6 +195,9 @@ migration. The three rules:
 /chores/templates/<id>/delete/     POST   delete household template
 
 /family/                           GET    family management screen
+/family/?edit=<id>                 GET    family screen with that member's edit form open (no-JS Edit link)
+/family/?remove=<id>               GET    family screen with that member's remove confirmation (no-JS Remove link), posts to /family/<id>/delete/
+                                          id not ASCII digits, out of range, repeated or no such member: 404; edit and remove together: 400
 /family/add/                       POST   add member
 /family/<id>/edit/                 POST   edit member
 /family/<id>/move/?dir=up|down     POST   move member up/down in rotation order
