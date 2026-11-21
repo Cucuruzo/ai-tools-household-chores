@@ -87,7 +87,8 @@ On deletion: active chore occurrences assigned to this member become unassigned.
 | recurrence_day   | IntegerField (nullable) — day of week (0=Mon) for weekly, day of month for monthly |
 | points           | IntegerField (choices: 5, 10, 20)                        |
 | is_template      | BooleanField (default False)                             |
-| template_source  | ForeignKey('self', nullable) — built-in template it was created from |
+| is_builtin       | BooleanField (default False) — built-in template shipped with the app (read-only) |
+| template_source  | ForeignKey('self', nullable, SET_NULL) — template (built-in or household) it was created from |
 
 ### ChoreOccurrence
 

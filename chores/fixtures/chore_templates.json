@@ -1,0 +1,74 @@
+[
+  {
+    "model": "chores.chore",
+    "fields": {
+      "title": "Take out the trash",
+      "instructions": "",
+      "start_date": "2026-01-05",
+      "due_time": null,
+      "assignment_mode": "rotating",
+      "eligibility": "everyone",
+      "assigned_to": null,
+      "recurrence": "weekly",
+      "recurrence_day": 0,
+      "points": 10,
+      "is_template": true,
+      "is_builtin": true,
+      "template_source": null
+    }
+  },
+  {
+    "model": "chores.chore",
+    "fields": {
+      "title": "Load the dishwasher",
+      "instructions": "",
+      "start_date": "2026-01-05",
+      "due_time": null,
+      "assignment_mode": "rotating",
+      "eligibility": "everyone",
+      "assigned_to": null,
+      "recurrence": "daily",
+      "recurrence_day": null,
+      "points": 5,
+      "is_template": true,
+      "is_builtin": true,
+      "template_source": null
+    }
+  },
+  {
+    "model": "chores.chore",
+    "fields": {
+      "title": "Clean the bathroom",
+      "instructions": "",
+      "start_date": "2026-01-05",
+      "due_time": null,
+      "assignment_mode": "rotating",
+      "eligibility": "adults",
+      "assigned_to": null,
+      "recurrence": "weekly",
+      "recurrence_day": 5,
+      "points": 20,
+      "is_template": true,
+      "is_builtin": true,
+      "template_source": null
+    }
+  },
+  {
+    "model": "chores.chore",
+    "fields": {
+      "title": "Change bed sheets",
+      "instructions": "",
+      "start_date": "2026-01-05",
+      "due_time": null,
+      "assignment_mode": "rotating",
+      "eligibility": "everyone",
+      "assigned_to": null,
+      "recurrence": "weekly",
+      "recurrence_day": 6,
+      "points": 20,
+      "is_template": true,
+      "is_builtin": true,
+      "template_source": null
+    }
+  }
+]

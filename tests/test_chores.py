@@ -18,6 +18,11 @@ def client():
     return Client()
 
 
+def chores():
+    """Normal chores only: the built-in templates exist in every test DB."""
+    return Chore.objects.filter(is_template=False)
+
+
 def make_member(name, role="adult", avatar="😀"):
     return Member.objects.create(name=name, role=role, avatar=avatar)
 
@@ -274,8 +279,8 @@ def test_page_has_change_handlers_for_both_dropdowns(client):
 def test_valid_create_saves_one_chore_and_redirects_with_message(client):
     response = post(client, title="Take out trash", instructions="Bins\nto curb",
                     due_time="07:30", points="20")
-    assert Chore.objects.count() == 1
-    chore = Chore.objects.get()
+    assert chores().count() == 1
+    chore = chores().get()
     assert response.status_code == 302
     assert response["Location"] == edit_url(chore)
     assert chore.is_template is False
@@ -301,7 +306,7 @@ def test_crafted_is_template_and_template_source_are_ignored(client):
 def test_create_fixed_with_assignee(client):
     ann = make_member("Ann")
     post(client, assignment_mode="fixed", assigned_to=str(ann.pk))
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.assignment_mode, chore.assigned_to, chore.eligibility) == ("fixed", ann, None)
 
 
@@ -309,7 +314,7 @@ def test_create_fixed_with_assignee(client):
 def test_create_fixed_without_assignee_is_allowed(client):
     response = post(client, assignment_mode="fixed", assigned_to="")
     assert response.status_code == 302
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.assignment_mode, chore.assigned_to) == ("fixed", None)
 
 
@@ -317,7 +322,7 @@ def test_create_fixed_without_assignee_is_allowed(client):
 @pytest.mark.parametrize("eligibility", ["kids", "adults", "everyone"])
 def test_create_rotating_for_each_eligibility(client, eligibility):
     post(client, assignment_mode="rotating", eligibility=eligibility)
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.assignment_mode, chore.eligibility, chore.assigned_to) == ("rotating", eligibility, None)
 
 
@@ -326,13 +331,13 @@ def test_rotating_saves_with_no_eligible_members(client):
     make_member("Dad", role="adult")
     response = post(client, assignment_mode="rotating", eligibility="kids")
     assert response.status_code == 302
-    assert Chore.objects.get().eligibility == "kids"
+    assert chores().get().eligibility == "kids"
 
 
 @pytest.mark.django_db
 def test_create_unassigned(client):
     post(client, assignment_mode="unassigned")
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.assignment_mode, chore.eligibility, chore.assigned_to) == ("unassigned", None, None)
 
 
@@ -345,7 +350,7 @@ def test_create_unassigned(client):
 def test_create_each_recurrence(client, recurrence, day, stored):
     response = post(client, recurrence=recurrence, recurrence_day=day)
     assert response.status_code == 302
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.recurrence, chore.recurrence_day) == (recurrence, stored)
 
 
@@ -354,7 +359,7 @@ def test_weekly_day_may_differ_from_start_weekday(client):
     # 2026-03-02 is a Monday; Friday is fine.
     response = post(client, recurrence="weekly", recurrence_day="4")
     assert response.status_code == 302
-    assert Chore.objects.get().recurrence_day == 4
+    assert chores().get().recurrence_day == 4
 
 
 @pytest.mark.django_db
@@ -362,7 +367,7 @@ def test_without_js_both_day_selects_posted_picks_matching_one(client):
     data = payload(recurrence="monthly")
     data["recurrence_day"] = ["2", "20"]  # weekday select first, month select second
     client.post(CREATE, data)
-    assert Chore.objects.get().recurrence_day == 20
+    assert chores().get().recurrence_day == 20
     data = payload(title="B", recurrence="weekly")
     data["recurrence_day"] = ["2", "20"]
     client.post(CREATE, data)
@@ -376,27 +381,27 @@ def test_without_js_both_day_selects_posted_picks_matching_one(client):
 @pytest.mark.parametrize("title", ["", "   ", "\t\n"])
 def test_empty_or_whitespace_title_rejected(client, title):
     assert_form_error(post(client, title=title), "title")
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
 def test_missing_title_key_rejected(client):
     assert_form_error(post(client, title=None), "title")
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
 def test_title_is_stripped(client):
     post(client, title="  Dishes  ")
-    assert Chore.objects.get().title == "Dishes"
+    assert chores().get().title == "Dishes"
 
 
 @pytest.mark.django_db
 def test_title_length_limit(client):
     assert_form_error(post(client, title="x" * 101), "title")
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
     assert post(client, title="x" * 100).status_code == 302
-    assert Chore.objects.get().title == "x" * 100
+    assert chores().get().title == "x" * 100
 
 
 @pytest.mark.django_db
@@ -407,27 +412,27 @@ def test_title_length_limit(client):
 )
 def test_bad_start_date_rejected(client, value):
     assert_form_error(post(client, start_date=value), "start_date")
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
 def test_past_start_date_allowed(client):
     response = post(client, start_date="2000-01-01")
     assert response.status_code == 302
-    assert Chore.objects.get().start_date == datetime.date(2000, 1, 1)
+    assert chores().get().start_date == datetime.date(2000, 1, 1)
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("value", ["25:00", "12:60", "noon", "9" * 50, "-1:00"])
 def test_bad_due_time_rejected(client, value):
     assert_form_error(post(client, due_time=value), "due_time")
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
 def test_empty_due_time_saved_as_null(client):
     post(client, due_time="")
-    assert Chore.objects.get().due_time is None
+    assert chores().get().due_time is None
 
 
 @pytest.mark.django_db
@@ -450,7 +455,7 @@ def test_empty_due_time_saved_as_null(client):
 )
 def test_unknown_choices_rejected(client, field, value):
     assert_form_error(post(client, **{field: value}), field)
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
@@ -458,7 +463,7 @@ def test_unknown_eligibility_rejected_even_when_mode_hides_it(client):
     response = post(client, assignment_mode="fixed", eligibility="pets")
     assert_form_error(response, "eligibility")
     assert not is_hidden(html(response), "eligibility")  # error is visible
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
@@ -470,14 +475,14 @@ def test_bad_assigned_to_rejected(client, value):
     make_member("Ann")
     response = post(client, assignment_mode="fixed", assigned_to=value)
     assert_form_error(response, "assigned_to")
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
 def test_rotating_without_eligibility_rejected(client):
     assert_form_error(post(client, assignment_mode="rotating", eligibility=""),
                       "eligibility", "Choose who is eligible")
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
@@ -486,7 +491,7 @@ def test_weekly_bad_day_rejected(client, day):
     response = post(client, recurrence="weekly", recurrence_day=day)
     assert_form_error(response, "recurrence_day", "Choose a day of the week")
     assert "Choose a day of the week" in html(response)
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
@@ -495,7 +500,7 @@ def test_monthly_bad_day_rejected(client, day):
     response = post(client, recurrence="monthly", recurrence_day=day)
     assert_form_error(response, "recurrence_day", "Choose a day of the month")
     assert "Choose a day of the month" in html(response)
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db
@@ -503,7 +508,7 @@ def test_empty_post_rerenders_with_errors(client):
     response = client.post(CREATE, {})
     assert response.status_code == 200
     assert "title" in response.context["form"].errors
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 # --- Field clearing --------------------------------------------------------
@@ -513,7 +518,7 @@ def test_empty_post_rerenders_with_errors(client):
 def test_fixed_clears_eligibility(client):
     ann = make_member("Ann")
     post(client, assignment_mode="fixed", assigned_to=str(ann.pk), eligibility="kids")
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.eligibility, chore.assigned_to) == (None, ann)
 
 
@@ -521,7 +526,7 @@ def test_fixed_clears_eligibility(client):
 def test_rotating_clears_assigned_to(client):
     ann = make_member("Ann")
     post(client, assignment_mode="rotating", eligibility="everyone", assigned_to=str(ann.pk))
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.eligibility, chore.assigned_to) == ("everyone", None)
 
 
@@ -529,7 +534,7 @@ def test_rotating_clears_assigned_to(client):
 def test_unassigned_clears_both(client):
     ann = make_member("Ann")
     post(client, assignment_mode="unassigned", eligibility="kids", assigned_to=str(ann.pk))
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert (chore.eligibility, chore.assigned_to) == (None, None)
 
 
@@ -539,7 +544,7 @@ def test_unassigned_clears_both(client):
 def test_once_and_daily_clear_recurrence_day(client, recurrence, day):
     response = post(client, recurrence=recurrence, recurrence_day=day)
     assert response.status_code == 302
-    assert Chore.objects.get().recurrence_day is None
+    assert chores().get().recurrence_day is None
 
 
 # --- Re-render after error -------------------------------------------------
@@ -574,7 +579,7 @@ def test_rerender_keeps_malformed_date_text(client):
 @pytest.mark.django_db
 def test_html_title_saved_as_is_and_escaped(client):
     post(client, title="<b>x</b>")
-    chore = Chore.objects.get()
+    chore = chores().get()
     assert chore.title == "<b>x</b>"
     page = html(client.get(edit_url(chore)))
     assert 'value="&lt;b&gt;x&lt;/b&gt;"' in page
@@ -630,7 +635,7 @@ def test_edit_updates_in_place(client):
     response = post(client, edit_url(chore), title="Wash up", points="5")
     assert response.status_code == 302
     assert response["Location"] == edit_url(chore)
-    assert Chore.objects.count() == 1
+    assert chores().count() == 1
     chore.refresh_from_db()
     assert (chore.title, chore.points) == ("Wash up", 5)
     assert "Chore saved" in html(client.get(edit_url(chore)))
@@ -725,7 +730,7 @@ def test_invalid_edit_leaves_record_unchanged(client, overrides):
 def test_unknown_id_404(client, pk):
     assert client.get(edit_url(pk)).status_code == 404
     assert post(client, edit_url(pk)).status_code == 404
-    assert Chore.objects.count() == 0
+    assert chores().count() == 0
 
 
 @pytest.mark.django_db

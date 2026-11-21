@@ -9,6 +9,31 @@ WEEKDAY_CHOICES = list(enumerate(WEEKDAYS))
 MONTHDAY_CHOICES = [(d, str(d)) for d in range(1, 32)]
 
 
+def parse_pk(raw):
+    """Return an int primary key for a string of ASCII digits in range, else None."""
+    if isinstance(raw, str) and raw.isascii() and raw.isdigit():
+        pk = int(raw)
+        if is_valid_pk(pk):
+            return pk
+    return None
+
+
+def find_template(raw):
+    """The template Chore for a raw id (query/POST value), or None if invalid."""
+    pk = parse_pk(raw)
+    if pk is None:
+        return None
+    return Chore.objects.filter(pk=pk, is_template=True).first()
+
+
+# Values copied from a template into a new chore form, and from a saved chore
+# into a new household template. start_date is not pre-filled from templates.
+TEMPLATE_FIELDS = [
+    "title", "instructions", "due_time", "assignment_mode", "eligibility",
+    "assigned_to", "recurrence", "recurrence_day", "points",
+]
+
+
 class MemberForm(forms.ModelForm):
     class Meta:
         model = Member
@@ -27,12 +52,12 @@ class MemberChoiceField(forms.ModelChoiceField):
     def to_python(self, value):
         if value in self.empty_values:
             return None
-        raw = str(value)
-        if not (raw.isascii() and raw.isdigit() and is_valid_pk(int(raw))):
+        pk = parse_pk(str(value))
+        if pk is None:
             raise forms.ValidationError(
                 self.error_messages["invalid_choice"], code="invalid_choice"
             )
-        return super().to_python(raw)
+        return super().to_python(pk)
 
 
 class RecurrenceDayWidget(forms.Widget):
@@ -77,6 +102,11 @@ class ChoreForm(forms.ModelForm):
         label="Assigned to",
     )
     recurrence_day = RecurrenceDayField(required=False, label="Recurrence day")
+    # Non-model fields. `template` never errors: a bad value just means "no template".
+    template = forms.Field(required=False, widget=forms.HiddenInput)
+    save_as_template = forms.BooleanField(
+        required=False, label="Also save as a household template"
+    )
 
     class Meta:
         model = Chore
@@ -105,6 +135,25 @@ class ChoreForm(forms.ModelForm):
             self.initial["start_date"] = timezone.localdate()
         self.fields["eligibility"].choices = [("", "— choose —")] + list(
             Chore.Eligibility.choices
+        )
+
+    @classmethod
+    def from_template(cls, template):
+        """An unbound create form pre-filled from a template (start date = today)."""
+        initial = {name: getattr(template, name) for name in TEMPLATE_FIELDS}
+        initial["assigned_to"] = template.assigned_to_id
+        initial["template"] = str(template.pk)
+        return cls(initial=initial)
+
+    def clean_template(self):
+        return find_template(self.cleaned_data.get("template"))
+
+    def save_household_template(self, chore):
+        """Create a household template copy of a saved chore."""
+        values = {name: getattr(chore, name) for name in TEMPLATE_FIELDS}
+        return Chore.objects.create(
+            start_date=chore.start_date, is_template=True, is_builtin=False,
+            template_source=None, **values,
         )
 
     def clean(self):

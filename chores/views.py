@@ -1,11 +1,12 @@
 from django.contrib import messages
 from django.db import transaction
+from django.db.models.functions import Lower
 from django.http import Http404, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from .forms import ChoreForm, MemberForm
+from .forms import ChoreForm, MemberForm, find_template
 from .models import Chore, Member
 from .profile import is_valid_pk, set_active_member
 
@@ -120,25 +121,50 @@ def profile_switch(request, pk):
     return redirect(target)
 
 
-def _save_chore(request, chore=None):
-    data = request.POST if request.method == "POST" else None
-    form = ChoreForm(data, instance=chore)
-    if request.method == "POST" and form.is_valid():
-        chore = form.save()
-        messages.success(request, "Chore saved")
-        return redirect("chore_edit", pk=chore.pk)
-    return render(request, "chores/chore_form.html", {"form": form, "chore": chore})
+def _chore_form_page(request, form, chore=None):
+    context = {"form": form, "chore": chore}
+    if chore is None:  # the picker is only offered when creating
+        templates = Chore.objects.filter(is_template=True).order_by(Lower("title"), "id")
+        builtin = [t for t in templates if t.is_builtin]
+        household = [t for t in templates if not t.is_builtin]
+        context["builtin_templates"] = builtin
+        context["household_templates"] = household
+        context["template_groups"] = [("Built-in", builtin), ("Household", household)]
+    return render(request, "chores/chore_form.html", context)
+
+
+def _save_chore(request, form, chore=None):
+    """Validate a bound ChoreForm and save; returns a response."""
+    if not form.is_valid():
+        return _chore_form_page(request, form, chore)
+    creating = chore is None
+    with transaction.atomic():
+        chore = form.save(commit=False)
+        if creating:
+            chore.template_source = form.cleaned_data["template"]
+        chore.save()
+        add_template = form.cleaned_data["save_as_template"]
+        if add_template:
+            form.save_household_template(chore)
+    messages.success(request, "Chore saved and template added" if add_template else "Chore saved")
+    return redirect("chore_edit", pk=chore.pk)
 
 
 @require_http_methods(["GET", "POST"])
 def chore_create(request):
-    return _save_chore(request)
+    if request.method == "POST":
+        return _save_chore(request, ChoreForm(request.POST))
+    template = find_template(request.GET.get("template"))
+    form = ChoreForm.from_template(template) if template else ChoreForm()
+    return _chore_form_page(request, form)
 
 
 @require_http_methods(["GET", "POST"])
 def chore_edit(request, pk):
     if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
         raise Http404("No such chore")
-    # Templates (is_template=True) are edited elsewhere (#6).
+    # Templates (is_template=True) are not editable here; that is #23.
     chore = get_object_or_404(Chore, pk=pk, is_template=False)
-    return _save_chore(request, chore)
+    if request.method == "POST":
+        return _save_chore(request, ChoreForm(request.POST, instance=chore), chore)
+    return _chore_form_page(request, ChoreForm(instance=chore), chore)

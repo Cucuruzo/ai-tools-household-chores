@@ -21,9 +21,13 @@
     <p class="message" role="status"><mark>{{ message }}</mark></p>
   {% endfor %}
 
+  {% if not chore %}{% include "chores/_template_picker.html" %}{% endif %}
+
+  <div id="chore-form-area">
   <form id="chore-form" method="post"
         action="{% if chore %}{% url 'chore_edit' chore.pk %}{% else %}{% url 'chore_create' %}{% endif %}">
     {% csrf_token %}
+    {% if not chore %}{{ form.template }}{% endif %}
     {{ form.non_field_errors }}
 
     <label for="{{ form.title.id_for_label }}">Title</label>
@@ -82,9 +86,13 @@
     <label for="{{ form.points.id_for_label }}">Points</label>
     {{ form.points }} {{ form.points.errors }}
 
+    <label for="{{ form.save_as_template.id_for_label }}">
+      {{ form.save_as_template }} {{ form.save_as_template.label }}
+    </label>
+    {{ form.save_as_template.errors }}
+
     <button type="submit">Save chore</button>
   </form>
-</section>
 
 <script>
   (function () {
@@ -114,4 +122,7 @@
     form.elements["recurrence"].addEventListener("change", sync);
   })();
 </script>
+  {# The script sits inside #chore-form-area so it re-runs when HTMX swaps in a template. #}
+  </div>
+</section>
 {% endblock %}

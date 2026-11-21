@@ -72,6 +72,8 @@ class Chore(models.Model):
     recurrence_day = models.IntegerField(null=True, blank=True)
     points = models.IntegerField(choices=POINTS_CHOICES, default=10)
     is_template = models.BooleanField(default=False)
+    # Built-in templates ship with the app (data migration) and stay read-only (#23).
+    is_builtin = models.BooleanField(default=False)
     template_source = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="derived_chores"
     )

@@ -1,0 +1,25 @@
+{% comment %}
+  Template picker for /chores/create/. Each link works without HTMX (full page
+  with the form pre-filled); with HTMX it swaps only #chore-form-area.
+{% endcomment %}
+{% if builtin_templates or household_templates %}
+<section id="template-picker">
+  <h2>Start from a template</h2>
+  {% for group, templates in template_groups %}
+    {% if templates %}
+      <h3>{{ group }}</h3>
+      <ul class="template-list">
+        {% for t in templates %}
+          {% url 'chore_create' as create_url %}
+          <li>
+            <a href="{{ create_url }}?template={{ t.pk }}"
+               hx-get="{{ create_url }}?template={{ t.pk }}"
+               hx-target="#chore-form-area" hx-select="#chore-form-area"
+               hx-swap="outerHTML" hx-push-url="true">{{ t.title }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endif %}
