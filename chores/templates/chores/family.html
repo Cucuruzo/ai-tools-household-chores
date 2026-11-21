@@ -3,6 +3,7 @@
 {% block title %}Family · Household Chores{% endblock %}
 
 {% block head %}
+<noscript><style>.js-only { display: none !important; }</style></noscript>
 <style>
   .member-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; }
   [hidden] { display: none !important; }
@@ -10,7 +11,8 @@
   .member-row .avatar { font-size: 2rem; }
   .member-row .info { flex: 1; }
   .member-row .actions { display: flex; gap: 0.5rem; }
-  .member-row .actions button { margin: 0; padding: 0.25rem 0.75rem; }
+  .member-row .actions button, .member-row .actions a[role=button] { margin: 0; padding: 0.25rem 0.75rem; }
+  .member-row .actions form { display: contents; }
   .member-row form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; width: 100%; margin: 0; }
   .member-row form > * { margin: 0; }
   .errorlist { color: var(--pico-del-color); list-style: none; padding: 0; margin: 0.25rem 0; }
@@ -23,7 +25,7 @@
 
   <div id="member-list">
     {% for member in members %}
-      {% include "chores/_member_row.html" with form=member.edit_form editing=False is_first=forloop.first is_last=forloop.last %}
+      {% include "chores/_member_row.html" with form=member.edit_form editing=member.editing confirm_remove=member.confirm_remove is_first=forloop.first is_last=forloop.last %}
     {% empty %}
       <p id="no-members">No family members yet</p>
     {% endfor %}
