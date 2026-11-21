@@ -532,3 +532,206 @@ def test_service_reads_no_clock_besides_today_default():
     assert "datetime.now" not in source
     assert "timezone.now" not in source
     assert source.count("timezone.localdate()") == 1
+
+
+# --- In-memory rotation agrees with next_member (#30) ----------------------
+
+
+def next_member_chain(c, days):
+    """The old per-date walk: one ``next_member`` call per date, from the
+    stored ``RotationState.last_member``."""
+    state = RotationState.objects.select_related("last_member").filter(chore=c).first()
+    last, chain = (state.last_member if state else None), []
+    for _ in days:
+        m = next_member(c, last)
+        if m is not None:
+            last = m
+        chain.append(getattr(m, "pk", None))
+    return chain
+
+
+def assert_agrees_over_60_days(*chores):
+    # Window starts on Monday 2026-11-16; the range starts later so the
+    # turns before it are counted, and covers 60 days.
+    result = project("2026-11-20", "2027-01-18", "2026-11-18")
+    for c in chores:
+        walked = [d("2026-11-16") + datetime.timedelta(days=n) for n in range(64)]
+        expected = next_member_chain(c, walked)[4:]
+        assert [o["member_id"] for o in result if o["chore_id"] == c.pk] == expected
+        assert len(expected) == 60
+
+
+@pytest.mark.django_db
+def test_agrees_with_next_member_when_member_moved_after_state():
+    a, b, c_ = member("A", order=0), member("B", order=1), member("C", order=2)
+    c = chore("daily", "2026-11-16", mode="rotating", eligibility="kids")
+    RotationState.objects.create(chore=c, last_member=b)
+    b.order = 5  # moved to the end after the state was written
+    b.save()
+    assert_agrees_over_60_days(c)
+    assert project("2026-11-16", "2026-11-17", "2026-11-16")[0]["member_id"] == a.pk  # after B (now last)
+
+
+@pytest.mark.django_db
+def test_agrees_with_next_member_when_last_member_deleted():
+    member("A", order=0), member("C", order=2)
+    b = member("B", order=1)
+    c = chore("daily", "2026-11-16", mode="rotating", eligibility="kids")
+    RotationState.objects.create(chore=c, last_member=b)
+    b.delete()
+    assert_agrees_over_60_days(c)
+
+
+@pytest.mark.django_db
+def test_first_turn_after_deleted_member_object_uses_its_stored_order():
+    a, c_ = member("A", order=0), member("C", order=2)
+    b = member("B", order=1)
+    c = chore("daily", mode="rotating", eligibility="kids")
+    stale = Member.objects.get(pk=b.pk)
+    Member.objects.filter(pk=b.pk).delete()
+    members = list(Member.objects.order_by("order", "id"))
+    pool = services._rotation_pools(members)["kids"]
+    index = services._first_turn_index(pool, stale, {m.pk: m.order for m in members})
+    assert pool[index] == next_member(c, stale) == c_
+
+
+@pytest.mark.django_db
+def test_agrees_with_next_member_for_empty_pool():
+    dad = member("Dad", "adult")
+    c = chore("daily", "2026-11-16", mode="rotating", eligibility="kids")
+    RotationState.objects.create(chore=c, last_member=dad)
+    assert_agrees_over_60_days(c)
+    assert RotationState.objects.get(chore=c).last_member == dad
+
+
+@pytest.mark.django_db
+def test_agrees_with_next_member_for_kids_adults_and_everyone():
+    member("K1", "kid", order=0)
+    mom = member("Mom", "adult", order=1)
+    member("K2", "kid", order=1)
+    member("Dad", "adult", order=3)
+    member("K3", "kid", order=4)
+    kids = chore("daily", "2026-11-16", mode="rotating", eligibility="kids", title="Kids")
+    adults = chore("daily", "2026-11-16", mode="rotating", eligibility="adults", title="Adults")
+    everyone = chore("daily", "2026-11-16", mode="rotating", eligibility="everyone", title="All")
+    RotationState.objects.create(chore=kids, last_member=mom)  # not in the kids pool
+    RotationState.objects.create(chore=everyone, last_member=mom)
+    assert_agrees_over_60_days(kids, adults, everyone)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("recurrence, day", [("weekly", 3), ("monthly", 31), ("once", None)])
+def test_agrees_with_next_member_for_other_recurrences(recurrence, day):
+    a, b, c_ = member("A", order=0), member("B", order=1), member("C", order=2)
+    c = chore(recurrence, "2026-11-19", mode="rotating", eligibility="kids", recurrence_day=day)
+    RotationState.objects.create(chore=c, last_member=b)
+    whole = project("2026-11-16", "2027-06-30", "2026-11-18")
+    expected = next_member_chain(c, whole)
+    for start in ["2026-11-16", "2026-12-24", "2027-03-01"]:
+        part = [o["member_id"] for o in project(start, "2027-06-30", "2026-11-18")]
+        assert part == expected[len(expected) - len(part):]
+
+
+@pytest.mark.django_db
+def test_far_week_matches_walking_every_week_from_now():
+    member("A", order=0), member("B", order=1), member("C", order=2)
+    chore("daily", "2026-11-16", mode="rotating", eligibility="kids")
+    chore("weekly", "2026-11-16", mode="rotating", eligibility="kids", recurrence_day=2, title="W")
+    walked = who(project("2026-11-16", "2099-12-27", "2026-11-18"))
+    assert who(project("2099-12-21", "2099-12-27", "2026-11-18")) == walked[-8:]
+
+
+@pytest.mark.django_db
+def test_no_writes_for_far_future_range():
+    a, b = member("A", order=0), member("B", order=1)
+    c = chore("daily", mode="rotating", eligibility="kids")
+    RotationState.objects.create(chore=c, last_member=a)
+    stored(c, "2026-11-16", member=a)
+    before = snapshot()
+    with CaptureQueriesContext(connection) as queries:
+        assert project("2126-11-01", "2126-11-30", "2026-11-18")
+    assert snapshot() == before
+    assert not [q["sql"] for q in queries if WRITE_SQL.match(q["sql"])]
+
+
+# --- Query count (#30) -----------------------------------------------------
+
+
+def query_count(start, end, today="2026-11-18"):
+    # CaptureQueriesContext keeps at most 9000 queries, so a per-date cost
+    # would look constant once capped; count every execute as well.
+    executed = []
+    with CaptureQueriesContext(connection) as queries, \
+            connection.execute_wrapper(lambda run, *args: executed.append(1) or run(*args)):
+        project(start, end, today)
+    assert len(queries) == len(executed) < 20
+    return len(queries)
+
+
+def household():
+    a, b = member("A", order=0), member("B", order=1)
+    member("C", order=2)
+    chore("daily", "2026-11-16", mode="rotating", eligibility="kids", title="Daily")
+    chore("weekly", "2026-11-16", mode="rotating", eligibility="kids", recurrence_day=4, title="Weekly")
+    chore("monthly", "2026-11-16", mode="fixed", assigned_to=a, recurrence_day=20, title="Monthly")
+
+
+@pytest.mark.django_db
+def test_query_count_does_not_depend_on_range():
+    household()
+    counts = {
+        rng: query_count(*rng)
+        for rng in [
+            ("2026-11-16", "2026-11-22"),
+            ("2027-11-01", "2027-11-30"),
+            ("2099-12-21", "2099-12-27"),
+            ("2026-11-16", "2126-11-15"),  # 100 years
+        ]
+    }
+    assert len(set(counts.values())) == 1, counts
+
+
+# Queries added per extra rotating chore: pools are loaded once per call.
+MAX_QUERIES_PER_ADDED_CHORE = 0
+
+
+@pytest.mark.django_db
+def test_query_count_per_added_rotating_chore_is_bounded():
+    member("A", order=0), member("B", order=1), member("C", order=2)
+    chore("daily", "2026-11-16", mode="rotating", eligibility="kids", title="Daily 1")
+    one = query_count("2099-12-21", "2099-12-27")
+    for n in range(2, 6):
+        chore("daily", "2026-11-16", mode="rotating", eligibility="kids", title=f"Daily {n}")
+    five = query_count("2099-12-21", "2099-12-27")
+    assert five - one <= 4 * MAX_QUERIES_PER_ADDED_CHORE
+
+
+# --- No overflow near date.max (#30) ---------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("recurrence, day", [("daily", None), ("weekly", 4), ("monthly", 31)])
+@pytest.mark.parametrize("mode", ["unassigned", "rotating"])
+def test_range_ending_on_date_max(recurrence, day, mode):
+    member("A", order=0)
+    c = chore(recurrence, "2026-11-16", mode=mode, recurrence_day=day,
+              eligibility="kids" if mode == "rotating" else None)
+    result = project_occurrences(d("9999-12-25"), datetime.date.max, today=d("9999-12-27"))
+    assert isinstance(result, list)
+    assert "9999-12-31" in dates(result, c)
+    if recurrence == "daily":
+        assert dates(result, c) == [f"9999-12-{n}" for n in range(27, 32)]  # from Monday 12-27
+
+
+@pytest.mark.django_db
+def test_single_day_range_on_date_max():
+    c = chore("daily", "2026-11-16")
+    result = project_occurrences(datetime.date.max, datetime.date.max, today=d("9999-12-27"))
+    assert dates(result, c) == ["9999-12-31"]
+
+
+@pytest.mark.django_db
+def test_stored_occurrence_on_date_max_does_not_overflow():
+    c = chore("daily", "2026-11-16")
+    stored(c, "9999-12-31")
+    assert project_occurrences(d("9999-12-25"), datetime.date.max, today=d("9999-12-27")) == []
