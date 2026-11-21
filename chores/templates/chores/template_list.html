@@ -1,0 +1,28 @@
+{% extends "chores/base.html" %}
+
+{% block title %}Manage templates · Household Chores{% endblock %}
+
+{% block content %}
+<section id="templates">
+  <h1>Manage templates</h1>
+
+  {% for message in messages %}
+    <p class="message" role="status"><mark>{{ message }}</mark></p>
+  {% endfor %}
+
+  {% for t in templates %}
+    <article class="template-row" id="template-{{ t.pk }}">
+      <strong>{{ t.title }}</strong>
+      <a href="{% url 'template_edit' t.pk %}" role="button" class="outline">Edit</a>
+      <button class="outline contrast"
+              hx-post="{% url 'template_delete' t.pk %}"
+              hx-confirm="Delete template {{ t.title }}? Chores created from it are kept."
+              hx-target="#templates" hx-select="#templates" hx-swap="outerHTML">Delete</button>
+    </article>
+  {% empty %}
+    <p>No household templates yet. Tick "Also save as a household template" when saving a chore to add one.</p>
+  {% endfor %}
+
+  <p><a href="{% url 'chore_create' %}">Back to new chore</a></p>
+</section>
+{% endblock %}

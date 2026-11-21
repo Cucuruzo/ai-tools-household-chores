@@ -179,6 +179,10 @@ are never scheduled directly.
 /chores/<id>/edit/                 POST   save chore edits
 /chores/<id>/delete/               POST   delete chore (with scope: this/future)
 /chores/create/                    POST   save new chore
+/chores/templates/                 GET    manage household templates
+/chores/templates/<id>/edit/       GET    edit template form
+/chores/templates/<id>/edit/       POST   save template edits
+/chores/templates/<id>/delete/     POST   delete household template
 
 /family/                           GET    family management screen
 /family/add/                       POST   add member

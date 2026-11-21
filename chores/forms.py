@@ -210,3 +210,13 @@ class ChoreForm(forms.ModelForm):
 
     def show_monthday(self):
         return self._current("recurrence") == Chore.Recurrence.MONTHLY
+
+
+class TemplateForm(ChoreForm):
+    """Edits a household template: no start date, picker field or save-as-template."""
+
+    template = None
+    save_as_template = None
+
+    class Meta(ChoreForm.Meta):
+        fields = [f for f in ChoreForm.Meta.fields if f != "start_date"]
