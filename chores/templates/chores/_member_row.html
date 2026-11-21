@@ -9,19 +9,19 @@
       {% if not is_first %}
         <button class="outline secondary" aria-label="Move {{ member.name }} up"
                 hx-post="{% url 'member_move' member.pk %}?dir=up"
-                hx-target="#family" hx-select="#family" hx-swap="outerHTML">↑</button>
+                hx-target="#family" hx-select="#family" hx-select-oob="#profile-switcher" hx-swap="outerHTML">↑</button>
       {% endif %}
       {% if not is_last %}
         <button class="outline secondary" aria-label="Move {{ member.name }} down"
                 hx-post="{% url 'member_move' member.pk %}?dir=down"
-                hx-target="#family" hx-select="#family" hx-swap="outerHTML">↓</button>
+                hx-target="#family" hx-select="#family" hx-select-oob="#profile-switcher" hx-swap="outerHTML">↓</button>
       {% endif %}
       <button class="outline" type="button"
               onclick="const row = this.closest('.member-row'); row.querySelector('.member-view').hidden = true; row.querySelector('.member-edit').hidden = false;">Edit</button>
       <button class="outline contrast"
               hx-post="{% url 'member_delete' member.pk %}"
               hx-confirm="Remove {{ member.name }}? Their chores will become unassigned."
-              hx-target="#family" hx-select="#family" hx-swap="outerHTML">Remove</button>
+              hx-target="#family" hx-select="#family" hx-select-oob="#profile-switcher" hx-swap="outerHTML">Remove</button>
     </div>
   </div>
   <form class="member-edit" {% if not editing %}hidden{% endif %}

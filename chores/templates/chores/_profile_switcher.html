@@ -1,4 +1,4 @@
-<nav id="profile-switcher" aria-label="Profile switcher">
+<nav id="profile-switcher" {% if switcher_oob %}hx-swap-oob="true" {% endif %}aria-label="Profile switcher">
   {% if members %}
     <ul>
       {% if not active_member %}
@@ -8,7 +8,7 @@
         <li>
           <form method="post" action="{% url 'profile_switch' member.pk %}">
             {% csrf_token %}
-            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <input type="hidden" name="next" value="{{ switcher_next|default:request.get_full_path }}">
             {% if active_member and member.pk == active_member.pk %}
               <button type="submit" class="profile active" aria-current="true">
                 <span class="avatar">{{ member.avatar }}</span> <strong>{{ member.name }}</strong>
