@@ -241,6 +241,23 @@ def _month_url(first, today):
     return reverse("calendar") + "?month=" + month.month_param(first)
 
 
+def _calendar_return(data, today):
+    """None unless return_to=calendar (exactly); else the normalized month
+    param: "" for the current month or a dropped value, else "YYYY-MM" (#36)."""
+    if data.get("return_to") != "calendar":
+        return None
+    first = month.parse_month(data.get("month"), today)
+    if first is None or first == month.first_of_month(today):
+        return ""
+    return month.month_param(first)
+
+
+def _calendar_url(calendar):
+    """``/calendar/`` plus ``?month=`` when ``calendar`` (a normalized month) is set."""
+    url = reverse("calendar")
+    return url + "?month=" + calendar if calendar else url
+
+
 def _calendar_context(first, today):
     nav = month.month_nav(first, today)
     if nav["is_current"]:
@@ -249,6 +266,7 @@ def _calendar_context(first, today):
     entries = _month_entries(nav, today)
     dashboard_url = reverse("dashboard")
     create_url = reverse("chore_create")
+    add_suffix = "&return_to=calendar" + ("" if nav["is_current"] else "&month=" + month.month_param(first))
     rows = []
     for week in month.grid_weeks(first):
         row = []
@@ -260,7 +278,7 @@ def _calendar_context(first, today):
                 cell["dashboard_url"] = dashboard_url + dash.dashboard_query(
                     dash.week_param(dash.monday_of(day)), None, day.isoweekday()
                 )
-                cell["add_url"] = f"{create_url}?date={day.isoformat()}"
+                cell["add_url"] = f"{create_url}?date={day.isoformat()}{add_suffix}"
                 cell["label"] = month.day_label(day)
             row.append(cell)
         rows.append(row)
@@ -450,7 +468,7 @@ def _edit_url(pk, filters, occurrence=None):
     return url
 
 
-def _create_url(start_date, template, recurrence, filters):
+def _create_url(start_date, template, recurrence, filters, calendar=None):
     """The create page's canonical URL from normalized values only (#34)."""
     parts = []
     if start_date:
@@ -465,15 +483,19 @@ def _create_url(start_date, template, recurrence, filters):
         query = dash.dashboard_query(dash.week_param(monday) if monday else None, member, day)
         if query:
             parts.append(query[1:])
+    elif calendar is not None:  # opened from a calendar day (#36)
+        parts.append("return_to=calendar")
+        if calendar:
+            parts.append(f"month={calendar}")
     url = reverse("chore_create")
     return url + "?" + "&".join(parts) if parts else url
 
 
 def _chore_form_page(request, form, chore=None, start_date=None, filters=None, scope=None,
-                     template=None, recurrence=None):
+                     template=None, recurrence=None, calendar=None):
     context = {"form": form, "chore": chore, "prefill_date": start_date}
     if chore is None:
-        context["switcher_next"] = _create_url(start_date, template, recurrence, filters)
+        context["switcher_next"] = _create_url(start_date, template, recurrence, filters, calendar)
     else:
         occurrence = scope.get("scope_occurrence") if scope else None
         context["switcher_next"] = _edit_url(chore.pk, filters, occurrence)
@@ -492,6 +514,13 @@ def _chore_form_page(request, form, chore=None, start_date=None, filters=None, s
             context["return_to"] = "dashboard"
             query = dash.dashboard_query(week, member, day)
             context["picker_return"] = "&return_to=dashboard" + ("&" + query[1:] if query else "")
+    if chore is None and filters is None and calendar is not None:  # from a calendar day (#36)
+        context.update(
+            return_to="calendar",
+            return_month=calendar,
+            calendar_back_url=_calendar_url(calendar),
+            picker_return="&return_to=calendar" + (f"&month={calendar}" if calendar else ""),
+        )
     if chore is None:  # the picker is only offered when creating
         templates = Chore.objects.filter(is_template=True).order_by(Lower("title"), "id")
         builtin = [t for t in templates if t.is_builtin]
@@ -507,7 +536,7 @@ def _edit_redirect(pk, filters, occurrence=None):
     return redirect(_edit_url(pk, filters, occurrence))
 
 
-def _save_chore(request, form, chore=None, filters=None, scope=None):
+def _save_chore(request, form, chore=None, filters=None, scope=None, calendar=None):
     """Validate a bound ChoreForm and save; returns a response.
 
     A new one-off due this week or earlier is stored at once (#19), and a
@@ -526,7 +555,8 @@ def _save_chore(request, form, chore=None, filters=None, scope=None):
         if scope is not None:
             # Show the saved chore (Delete options), not the rejected values.
             chore = Chore.objects.get(pk=chore.pk)
-        return _chore_form_page(request, form, chore, filters=filters, scope=scope)
+        return _chore_form_page(request, form, chore, filters=filters, scope=scope,
+                                calendar=calendar)
     try:
         with transaction.atomic():
             chore = form.save(commit=False)
@@ -551,6 +581,8 @@ def _save_chore(request, form, chore=None, filters=None, scope=None):
     messages.success(request, "Chore saved and template added" if add_template else "Chore saved")
     if creating and filters is not None:  # opened with return_to=dashboard (#19)
         return _dashboard_redirect(request.POST)
+    if creating and calendar is not None:  # opened with return_to=calendar (#36)
+        return redirect(_calendar_url(calendar))
     return _edit_redirect(chore.pk, filters)
 
 
@@ -601,8 +633,9 @@ def chore_create(request):
     # POST the hidden inputs (#19).
     data = request.POST if request.method == "POST" else request.GET
     filters = _dashboard_filters(data) if data.get("return_to") == "dashboard" else None
+    calendar = _calendar_return(data, timezone.localdate())
     if request.method == "POST":
-        return _save_chore(request, ChoreForm(request.POST), filters=filters)
+        return _save_chore(request, ChoreForm(request.POST), filters=filters, calendar=calendar)
     # ?date= and ?recurrence= are read here only: never on edit, never on POST (#14, #19).
     start_date = month.parse_date(request.GET.get("date"))
     template = find_template(request.GET.get("template"))
@@ -619,7 +652,7 @@ def chore_create(request):
     else:
         form = ChoreForm(initial=initial)
     return _chore_form_page(request, form, start_date=start_date, filters=filters,
-                            template=template, recurrence=recurrence)
+                            template=template, recurrence=recurrence, calendar=calendar)
 
 
 @require_http_methods(["GET", "POST"])

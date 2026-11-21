@@ -326,6 +326,7 @@ date (only an override can exist for a one-off).
 /chores/create/?date=2026-09-08    GET    chore creation with pre-filled date
 /chores/create/?date=2026-09-08&recurrence=once&return_to=dashboard[&week=&member=&day=]
                                    GET    "+ Add Chore" from the dashboard (#19): back to that view after saving
+/chores/create/?date=…&return_to=calendar[&month=YYYY-MM]  GET  "+" on a calendar day (#36): back to that month after saving
 /chores/<id>/edit/                 GET    edit chore form (recurring: cutoff D = today)
 /chores/<id>/edit/?occurrence=<pk> GET    edit a recurring chore from one stored row (#20): D = its date,
                                           plus the "This occurrence only" form for a todo row;

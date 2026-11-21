@@ -758,7 +758,7 @@ def test_day_links(client):
     c = cell(page(client), 18)
     assert c["links"][0] == "/dashboard/?week=2026-W47&day=3"
     assert 'aria-label="Show Wed, Nov 18 on the dashboard"' in c["html"]
-    assert c["links"][-1] == "/chores/create/?date=2026-11-18"
+    assert c["links"][-1] == "/chores/create/?date=2026-11-18&return_to=calendar"
     assert 'aria-label="Add a chore on Wed, Nov 18"' in c["html"]
     jan = cell(page(client, "2027-01"), 1)
     assert jan["links"][0] == "/dashboard/?week=2026-W53&day=5"
@@ -769,8 +769,8 @@ def test_every_in_month_cell_has_add_link_including_past_days(client):
     for c in flat(body):
         if c["filler"]:
             continue
-        assert re.fullmatch(r"/chores/create/\?date=2026-11-\d\d", c["links"][-1])
-    assert cell(body, 1)["links"][-1] == "/chores/create/?date=2026-11-01"
+        assert re.fullmatch(r"/chores/create/\?date=2026-11-\d\d&return_to=calendar", c["links"][-1])
+    assert cell(body, 1)["links"][-1] == "/chores/create/?date=2026-11-01&return_to=calendar"
 
 
 def test_day_link_opens_dashboard_week(client):
