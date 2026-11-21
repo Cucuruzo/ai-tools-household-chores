@@ -212,8 +212,8 @@ migration. The three rules:
 ## Edit scope (#20)
 
 Editing a **recurring** chore (`daily` / `weekly` / `monthly`) asks for a
-scope. One-off chores ignore `scope` and `occurrence` and save in place
-(#35 will sync their row).
+scope. One-off chores ignore `scope` and `occurrence` and save in place,
+keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35)).
 
 - **In place, no split.** "This and future" edits the existing `Chore` row,
   so its pk, streak (#16), `RotationState` (#7) and `template_source` carry
@@ -257,12 +257,56 @@ scope. One-off chores ignore `scope` and `occurrence` and save in place
   with the new values.
 - **Once ↔ repeating**: not allowed once the chore has any stored row (form
   error on `recurrence`); stop a repeating chore with Delete (#5). Without
-  rows it is a plain in-place save.
+  rows, Once → repeating is a plain in-place save (exceptions are left as
+  they are), and a switch to Once follows
+  [Editing a one-off (#35)](#editing-a-one-off-35).
 - **Accepted costs**: `title` and `instructions` live only on `Chore`, so a
   rename also shows on rows dated before D (history, contribution, progress,
   past cards) until #39. After a recurrence change, older rows still count in
   the same streak (6 daily `done` rows and 1 weekly `done` row show 7 in a
   row).
+
+## Editing a one-off (#35)
+
+Saving the edit form of a chore that is `once` after the save (a one-off
+edit, or a repeating chore switched to Once without rows) runs
+`services.apply_one_off_edit(chore, old, today)`. `today` is read once per
+request (`scope_today` when a scope exists, else the viewer's local date) and
+the service never reads the clock. *Old date* / *new date* are `start_date`
+before / after the save; *due by Sunday* means on or before the current
+Sunday (past weeks included). *The row* is the chore's only
+`ChoreOccurrence`; *the exception* is its `OccurrenceException` on the old
+date (only an override can exist for a one-off).
+
+| Before the save | New date due by Sunday | New date in a future week |
+|---|---|---|
+| Row `todo`, not cancelled | Same row (same pk) gets the new date, the chore's `due_time` and `points`. Member and `is_override` are kept, except after an assignment change | Row deleted. If it `is_override` or the chore rotates (and no assignment field changed), `OccurrenceException(new date, is_override=True, member=row.member)` is written; otherwise projection gives the same member |
+| Row `done` / `skipped` / cancelled | Row never written; other fields are saved on the chore only. A changed date is a form error | same |
+| No row | Row created with `materialize_one_off`. With the exception and no assignment change, the row then gets its member and `is_override=True`, and the exception is deleted (the date still takes its rotation turn, as in `materialize_week`) | No row. The exception, if kept, moves to the new date |
+
+- **Assignment change** (any of `ASSIGNMENT_FIELDS`): the form's latest
+  choice wins. A todo row gets the new member (one `advance_rotation` turn
+  for rotating) and `is_override=False`, and the exception is deleted.
+  Without one, a todo row's member is never touched.
+- Exceptions of the chore on any **other date** than the old date are
+  deleted, so none comes back if the date moves back.
+- **Equal values write nothing**: an unchanged re-save writes only the
+  `Chore` row, no occurrence, exception or rotation row.
+- **History**: changing the date while the row is done, skipped or
+  cancelled is a form error on `start_date` ("Undo Done or Skip on the
+  dashboard before changing the date of this chore."), checked in
+  `ChoreForm.clean` and again under the lock (`OneOffEditRefused`, the whole
+  save rolls back).
+- **`end_date` never changes.** A one-off with `end_date` and a todo row
+  (deleted with history, then Undo) may move to this week or earlier; a move
+  into a future week would hide it and is refused ("This chore was deleted,
+  so it can only move to this week or earlier.").
+- Crafted data with more than one row: only the chore is saved.
+- One transaction after `Chore.objects.select_for_update()`, as
+  `apply_future_edit`. An `IntegrityError` (a concurrent store of the same
+  date) rolls the attempt back, turns included, and is retried once.
+- Title and instructions live only on `Chore`, so they also show on a done
+  row (#39).
 
 ## Screens and URL Design
 

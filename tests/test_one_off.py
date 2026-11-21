@@ -379,12 +379,12 @@ def test_recurring_gets_no_row_on_save(client, fields):
     assert ChoreOccurrence.objects.count() > 0
 
 
-def test_editing_creates_nothing(client):
+def test_editing_keeps_one_row(client):
     save(client, start_date="2026-11-30")
     c = Chore.objects.get(title="Dishes", is_template=False)
     with at(SAT):
         client.post(f"/chores/{c.pk}/edit/", payload(start_date="2026-11-21"))
-    assert ChoreOccurrence.objects.count() == 0
+    assert [(o.date, o.status) for o in ChoreOccurrence.objects.all()] == [(d("2026-11-21"), "todo")]
     save(client, start_date="2026-11-21", title="Now")
     now = Chore.objects.get(title="Now")
     before = ChoreOccurrence.objects.count()

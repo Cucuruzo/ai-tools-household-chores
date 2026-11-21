@@ -19,9 +19,10 @@ from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
 from .services import (
-    ASSIGNMENT_FIELDS, RULE_FIELDS, apply_future_edit, cancel_projected_date, eligible_pool,
-    materialize_one_off, materialize_week, project_occurrences, projected_occurrence,
-    set_occurrence_status, set_projected_member, update_occurrence,
+    ASSIGNMENT_FIELDS, RULE_FIELDS, OneOffEditRefused, apply_future_edit, apply_one_off_edit,
+    cancel_projected_date, eligible_pool, materialize_one_off, materialize_week,
+    project_occurrences, projected_occurrence, set_occurrence_status, set_projected_member,
+    update_occurrence,
 )
 
 
@@ -483,30 +484,40 @@ def _save_chore(request, form, chore=None, filters=None, scope=None):
     create opened from the dashboard returns there.
 
     With ``scope`` (a recurring chore's edit, #20) a repeating schedule is
-    saved "this and future" from ``scope["scope_day"]``.
+    saved "this and future" from ``scope["scope_day"]``. An edit that leaves
+    the chore ``once`` keeps its row or projected date in sync (#35), with
+    ``today`` read once: ``scope["scope_today"]``, else the viewer's date.
     """
+    creating = chore is None
     old = None
-    if scope is not None:  # read before is_valid(), which writes the form values onto it
+    if not creating:  # read before is_valid(), which writes the form values onto it
         old = {name: getattr(chore, name) for name in RULE_FIELDS + ASSIGNMENT_FIELDS}
     if not form.is_valid():
         if scope is not None:
             # Show the saved chore (Delete options), not the rejected values.
             chore = Chore.objects.get(pk=chore.pk)
         return _chore_form_page(request, form, chore, filters=filters, scope=scope)
-    creating = chore is None
-    with transaction.atomic():
-        chore = form.save(commit=False)
-        if creating:
-            chore.template_source = form.cleaned_data["template"]
-        if scope is not None and chore.recurrence != Chore.Recurrence.ONCE:
-            apply_future_edit(chore, old, scope["scope_day"], scope["scope_today"])
-        else:
-            chore.save()
-        if creating and chore.recurrence == Chore.Recurrence.ONCE:
-            materialize_one_off(chore, timezone.localdate())
-        add_template = form.cleaned_data["save_as_template"]
-        if add_template:
-            form.save_household_template(chore)
+    try:
+        with transaction.atomic():
+            chore = form.save(commit=False)
+            if creating:
+                chore.template_source = form.cleaned_data["template"]
+            if scope is not None and chore.recurrence != Chore.Recurrence.ONCE:
+                apply_future_edit(chore, old, scope["scope_day"], scope["scope_today"])
+            elif not creating and chore.recurrence == Chore.Recurrence.ONCE:
+                today = scope["scope_today"] if scope is not None else timezone.localdate()
+                apply_one_off_edit(chore, old, today)
+            else:
+                chore.save()
+            if creating and chore.recurrence == Chore.Recurrence.ONCE:
+                materialize_one_off(chore, timezone.localdate())
+            add_template = form.cleaned_data["save_as_template"]
+            if add_template:
+                form.save_household_template(chore)
+    except OneOffEditRefused as refused:  # everything above is rolled back
+        form.add_error("start_date", str(refused))
+        chore = Chore.objects.get(pk=chore.pk)
+        return _chore_form_page(request, form, chore, filters=filters, scope=scope)
     messages.success(request, "Chore saved and template added" if add_template else "Chore saved")
     if creating and filters is not None:  # opened with return_to=dashboard (#19)
         return _dashboard_redirect(request.POST)
@@ -588,7 +599,8 @@ def chore_edit(request, pk):
     data = request.POST if request.method == "POST" else request.GET
     filters = _dashboard_filters(data)
     if chore.recurrence == Chore.Recurrence.ONCE:
-        # One-off chores: occurrence and scope are ignored (#20; #35 syncs the row).
+        # One-off chores: occurrence and scope are ignored (#20); _save_chore keeps
+        # the row or projected date in sync through apply_one_off_edit (#35).
         if request.method == "POST":
             return _save_chore(request, ChoreForm(request.POST, instance=chore), chore, filters)
         return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters)

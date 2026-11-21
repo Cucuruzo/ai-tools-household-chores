@@ -1,13 +1,15 @@
 from django import forms
 from django.utils import timezone
 
-from .models import Chore, Member
+from .models import Chore, ChoreOccurrence, Member
 from .profile import is_valid_pk
+from .services import OneOffEditRefused
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 WEEKDAY_CHOICES = list(enumerate(WEEKDAYS))
 MONTHDAY_CHOICES = [(d, str(d)) for d in range(1, 32)]
 SWITCH_ERROR = "A chore that already has occurrences can't switch between Once and a repeating schedule."
+HISTORY_DATE_ERROR = OneOffEditRefused.HISTORY  # #35, also raised under the lock
 
 
 def parse_pk(raw):
@@ -192,6 +194,15 @@ class ChoreForm(forms.ModelForm):
                 and (previous == Chore.Recurrence.ONCE) != (recurrence == Chore.Recurrence.ONCE)
                 and self.instance.occurrences.exists()):
             self.add_error("recurrence", SWITCH_ERROR)
+        # #35: a one-off's date stays put while its row is history (done,
+        # skipped or cancelled). services.apply_one_off_edit checks it again.
+        new_date = cleaned.get("start_date")
+        if (self.instance.pk is not None and previous == Chore.Recurrence.ONCE
+                and recurrence == Chore.Recurrence.ONCE
+                and new_date is not None and new_date != self.instance.start_date
+                and self.instance.occurrences.exclude(
+                    status=ChoreOccurrence.Status.TODO, is_cancelled=False).exists()):
+            self.add_error("start_date", HISTORY_DATE_ERROR)
         return cleaned
 
     # --- template helpers --------------------------------------------------

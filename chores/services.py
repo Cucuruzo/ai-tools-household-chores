@@ -610,3 +610,112 @@ def apply_future_edit(chore, old, day, today):
         return _future_edit_attempt(chore, old, day, today)
     except IntegrityError:
         return _future_edit_attempt(chore, old, day, today)
+
+
+# --- Editing a one-off (#35) ------------------------------------------------------
+
+
+class OneOffEditRefused(Exception):
+    """A one-off edit that would rewrite history or hide a deleted chore.
+
+    ``str(error)`` is the message shown on ``start_date``.
+    """
+
+    HISTORY = "Undo Done or Skip on the dashboard before changing the date of this chore."
+    DELETED = "This chore was deleted, so it can only move to this week or earlier."
+
+
+def _one_off_edit_attempt(chore, old, today):
+    with transaction.atomic():
+        Chore.objects.select_for_update().filter(pk=chore.pk).first()
+        rows = list(ChoreOccurrence.objects.select_for_update().filter(chore=chore)[:2])
+        old_date, new_date = old["start_date"], chore.start_date
+        due = new_date <= _monday_of(today) + 6 * ONE_DAY
+        row = rows[0] if len(rows) == 1 else None
+        frozen = row is not None and (row.status != ChoreOccurrence.Status.TODO or row.is_cancelled)
+        if frozen and new_date != old_date:
+            raise OneOffEditRefused(OneOffEditRefused.HISTORY)
+        if row is not None and not frozen and not due and chore.end_date is not None:
+            raise OneOffEditRefused(OneOffEditRefused.DELETED)
+        chore.save()
+        if len(rows) > 1 or frozen:
+            return chore  # crafted data or history: only the chore is saved
+
+        assignment_changed = any(getattr(chore, f) != old[f] for f in ASSIGNMENT_FIELDS)
+        exceptions = list(OccurrenceException.objects.select_for_update().filter(chore=chore))
+        exception = next((e for e in exceptions if e.date == old_date), None)
+        if exception is not None and (assignment_changed or not exception.is_override
+                                      or exception.is_cancelled):
+            exception = None  # the form's latest choice wins over a card assign
+        # Every other exception goes, so none comes back if the date moves back.
+        stale = [e.pk for e in exceptions if e is not exception]
+        if stale:
+            OccurrenceException.objects.filter(pk__in=stale).delete()
+
+        if row is not None and due:
+            fields = []
+            for name, value in (("date", new_date), ("due_time", chore.due_time),
+                                ("points", chore.points)):
+                if getattr(row, name) != value:
+                    setattr(row, name, value)
+                    fields.append(name)
+            if assignment_changed:
+                member_id = getattr(advance_rotation(chore), "pk", None)
+                if row.member_id != member_id or row.is_override:
+                    row.member_id, row.is_override = member_id, False
+                    fields += ["member", "is_override"]
+            if fields:
+                row.save(update_fields=fields)
+            if exception is not None:
+                exception.delete()
+        elif row is not None:
+            # A stored row in a future week would be a "To do" card on a week
+            # that has not started: delete it and project the date again.
+            keep = not assignment_changed and (
+                row.is_override or chore.assignment_mode == Chore.AssignmentMode.ROTATING
+            )
+            row.delete()  # a todo row is not history; the turn is not given back
+            if exception is not None:
+                exception.delete()
+            if keep:
+                OccurrenceException.objects.create(
+                    chore=chore, date=new_date, is_override=True, member_id=row.member_id
+                )
+        elif due:
+            created = materialize_one_off(chore, today)
+            if exception is not None:
+                # As materialize_week does: the date took its turn, the
+                # exception's member replaces it, and the exception is used up.
+                created.member_id, created.is_override = exception.member_id, True
+                created.save(update_fields=["member", "is_override"])
+                exception.delete()
+        elif exception is not None and exception.date != new_date:
+            exception.date = new_date
+            exception.save(update_fields=["date"])
+        return chore
+
+
+def apply_one_off_edit(chore, old, today):
+    """Save an edit of a chore that is ``once`` after the save (#35).
+
+    ``chore`` holds the new values (``form.save(commit=False)``); ``old`` maps
+    ``RULE_FIELDS`` and ``ASSIGNMENT_FIELDS`` to their values before the
+    edit. ``today`` is the caller's local date; this never reads the clock.
+
+    In one transaction, after locking the chore: a todo row dated by this
+    Sunday gets the new date, due time and points (and a new member, with
+    ``is_override=False``, after an assignment change); a todo row moved into
+    a future week is deleted, keeping its member with an override exception
+    when it was an override or the chore rotates. Without a row, a date due
+    by Sunday is stored with ``materialize_one_off`` (consuming the old
+    date's override), and a future date takes that override along. Done,
+    skipped and cancelled rows are never written; a date change on them, or
+    a deleted chore's row moved into a future week, raises
+    ``OneOffEditRefused`` and writes nothing. Equal values write nothing.
+    An ``IntegrityError`` (a concurrent store of the same date) rolls the
+    attempt back, turns included, and it is retried once from a fresh read.
+    """
+    try:
+        return _one_off_edit_attempt(chore, old, today)
+    except IntegrityError:
+        return _one_off_edit_attempt(chore, old, today)
