@@ -1,8 +1,11 @@
 {% comment %}
   One chore occurrence (#10). Stored cards carry id="occurrence-<pk>" for
   #5, #12 and #13; projected cards (status "Planned") carry
-  id="planned-<chore_id>-<YYYY-MM-DD>" (#31) and are followed by their own
-  "Assigned to" form (no wrapper, no Delete, no Done/Skip).
+  id="planned-<chore_id>-<YYYY-MM-DD>" (#31) and are followed directly by
+  their own "Assigned to" form, then their Delete confirmation (#22): the
+  same <details> as a stored card's, posting a hidden date (no occurrence)
+  with "This occurrence only" / "This and all future occurrences" (one-off:
+  "Delete"). No wrapper, no Done/Skip.
   Stored cards are followed by their Delete confirmation (#5): a plain form
   POST in a <details>, so it opens and closes without a request or JS.
   Then the Done/Skip/Undo form (#12), outside the <article>. A stored card's
@@ -95,4 +98,22 @@
   </select>
   <noscript><button type="submit">Assign</button></noscript>
 </form>
+<details class="delete-confirm">
+  <summary role="button" class="outline contrast">Delete</summary>
+  <form method="post" action="{% url 'chore_delete' card.chore_id %}">
+    {% csrf_token %}
+    <input type="hidden" name="date" value="{{ card.date|date:'Y-m-d' }}">
+    {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+    {% if filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+    {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+    {% if not card.recurring %}
+      <p>Delete this chore?</p>
+      <button type="submit" name="scope" value="future" class="contrast">Delete</button>
+    {% else %}
+      <button type="submit" name="scope" value="this" class="contrast">This occurrence only</button>
+      <button type="submit" name="scope" value="future" class="contrast">This and all future occurrences</button>
+    {% endif %}
+    <button type="button" class="secondary" onclick="this.closest('details').open = false;">Cancel</button>
+  </form>
+</details>
 {% endwith %}{% endif %}

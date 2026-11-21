@@ -342,6 +342,24 @@ def set_projected_member(chore, day, member_id):
                 raise
 
 
+def cancel_projected_date(chore, day):
+    """Delete projected date ``day`` on its own (#22): create or update the
+    one ``(chore, day)`` exception with ``is_cancelled=True``. An override on
+    the same row stays but no longer matters. Writes nothing else: the date
+    still takes its rotation turn (rule 7). A concurrent insert that hits the
+    unique constraint is retried once, as an update."""
+    for attempt in range(2):
+        try:
+            with transaction.atomic():
+                OccurrenceException.objects.update_or_create(
+                    chore=chore, date=day, defaults={"is_cancelled": True},
+                )
+            return
+        except IntegrityError:
+            if attempt:
+                raise
+
+
 # --- Materialization (#9) ----------------------------------------------------
 
 

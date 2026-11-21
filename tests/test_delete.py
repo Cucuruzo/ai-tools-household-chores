@@ -63,7 +63,10 @@ def dates(c, **filters):
 STORED = re.compile(
     r'<article class="chore-card" id="occurrence-(\d+)">.*?</article>\s*'
     r'(?:<details class="delete-confirm">(.*?)</details>)?', re.S)
-PROJECTED_WITH_DELETE = re.compile(r'<article class="chore-card"(?: id="planned-\d+-\d{4}-\d{2}-\d{2}")?>(?:(?!<article).)*?</article>\s*<details', re.S)
+PROJECTED_WITH_DELETE = re.compile(
+    r'<article class="chore-card" id="planned-\d+-\d{4}-\d{2}-\d{2}">(?:(?!<article).)*?</article>\s*'
+    r'<form class="assign"[^>]*>(?:(?!<article).)*?</form>\s*'
+    r'<details class="delete-confirm">((?:(?!<article).)*?)</details>', re.S)
 DETAILS = re.compile(r'<details class="delete-confirm">(.*?)</details>', re.S)
 
 
@@ -235,7 +238,7 @@ def test_no_delete_on_create_or_template_edit(client):
 
 
 @pytest.mark.django_db
-def test_every_stored_card_has_delete_projected_none(client):
+def test_every_stored_and_planned_card_has_delete(client):
     c = weekly("Daily", weekday=None, recurrence="daily", start="2026-11-01")
     past = row(c, "2026-11-10")  # Overdue from an earlier week, and on W46
     future = row(chore("Later", start_date="2026-11-25"), "2026-11-25", status="skipped")
@@ -248,7 +251,9 @@ def test_every_stored_card_has_delete_projected_none(client):
     w48 = page(client, "2026-W48")
     assert set(controls(w48)) == {future.pk} and controls(w48)[future.pk]
     assert 'class="status">Planned' in w48
-    assert not PROJECTED_WITH_DELETE.search(w48)
+    planned = PROJECTED_WITH_DELETE.findall(w48)
+    assert len(planned) == w48.count('<article class="chore-card" id="planned-') >= 1
+    assert all("date" in hidden(inner) and "occurrence" not in hidden(inner) for inner in planned)
 
 
 @pytest.mark.django_db

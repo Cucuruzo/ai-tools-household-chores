@@ -19,9 +19,9 @@ from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
 from .services import (
-    ASSIGNMENT_FIELDS, RULE_FIELDS, apply_future_edit, eligible_pool, materialize_one_off,
-    materialize_week, project_occurrences, projected_occurrence, set_occurrence_status,
-    set_projected_member, update_occurrence,
+    ASSIGNMENT_FIELDS, RULE_FIELDS, apply_future_edit, cancel_projected_date, eligible_pool,
+    materialize_one_off, materialize_week, project_occurrences, projected_occurrence,
+    set_occurrence_status, set_projected_member, update_occurrence,
 )
 
 
@@ -80,10 +80,12 @@ def _projected_cards(projected, pools):
     cards = []
     for p in projected:
         member = members.get(p["member_id"])
+        chore = chores[p["chore_id"]]
         cards.append(dash.Card(
             pk=None, chore_id=p["chore_id"], title=p["title"], date=p["date"],
             due_time=p["due_time"], points=p["points"], status=dash.PLANNED, member=member,
-            assignee_note=_note(pools, chores[p["chore_id"]], p["assignment_mode"], member, p["is_override"]),
+            assignee_note=_note(pools, chore, p["assignment_mode"], member, p["is_override"]),
+            recurring=chore.recurrence != Chore.Recurrence.ONCE,
         ))
     return cards
 
@@ -620,12 +622,17 @@ def _end_before(chore, day):
 def _delete_from(chore, start, today):
     """"This and future" from ``start``: to-do rows on/after it go, nothing before it does.
 
+    The chore's exceptions (#31) dated on/after ``start`` go with them (#22),
+    whoever calls: the stored card, the edit page and the Planned card.
+    Exceptions before ``start`` stay, so those dates keep their members.
+
     The chore is kept with ``end_date = start - 1`` when something before
     ``start`` is left to show: a done / skipped row, a non-cancelled to-do row,
     or a date still projected from this week's Monday. Otherwise the chore row
     goes, with its cancelled rows and RotationState (CASCADE).
     """
     chore.occurrences.filter(status=ChoreOccurrence.Status.TODO, date__gte=start).delete()
+    chore.exceptions.filter(date__gte=start).delete()
     last = start - datetime.timedelta(days=1)
     keep = (
         chore.occurrences.filter(status__in=_HISTORY).exists()
@@ -644,13 +651,31 @@ def _delete_from(chore, start, today):
 
 @require_POST
 def chore_delete(request, pk):
+    """Delete a chore, one stored occurrence (``occurrence``, #5) or one
+    projected date (``date``, #22), or "this and future" from either.
+
+    ``date`` must be a projected date of the chore for the viewer's
+    ``today`` (#26). ``today`` is read at most once, and the same value is
+    used for that check and for ``_delete_from``.
+    """
     if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
         raise Http404("No such chore")
+    today = None
     with transaction.atomic():
         # Templates are deleted only through template_delete (#23).
         chore = get_object_or_404(Chore.objects.select_for_update(), pk=pk, is_template=False)
         occurrence = None
-        if "occurrence" in request.POST:
+        day = None
+        if "occurrence" in request.POST and "date" in request.POST:
+            return HttpResponseBadRequest("Give an occurrence or a date, not both")
+        if "date" in request.POST:
+            day = month.parse_date(request.POST.get("date"))
+            if day is None:
+                return HttpResponseBadRequest("Invalid date")
+            today = timezone.localdate()
+            if projected_occurrence(chore, day, today) is None:
+                raise Http404("Not a planned date of this chore")
+        elif "occurrence" in request.POST:
             occurrence_pk = _parse_pk(request.POST["occurrence"])
             if occurrence_pk is None:
                 raise Http404("No such occurrence")
@@ -668,13 +693,17 @@ def chore_delete(request, pk):
             if scope not in ("this", "future"):
                 return HttpResponseBadRequest("scope must be 'this' or 'future'")
             if scope == "this":
-                if occurrence is None or occurrence.status != ChoreOccurrence.Status.TODO:
+                if day is not None:
+                    cancel_projected_date(chore, day)
+                elif occurrence is None or occurrence.status != ChoreOccurrence.Status.TODO:
                     return HttpResponseBadRequest("Only a to-do occurrence can be deleted on its own")
-                occurrence.is_cancelled = True
-                occurrence.save(update_fields=["is_cancelled"])
+                else:
+                    occurrence.is_cancelled = True
+                    occurrence.save(update_fields=["is_cancelled"])
             else:
-                today = timezone.localdate()
-                start = occurrence.date if occurrence else today
+                if today is None:
+                    today = timezone.localdate()
+                start = day or (occurrence.date if occurrence else today)
                 _delete_from(chore, start, today)
     messages.success(request, "Chore deleted")
     return _dashboard_redirect(request.POST)

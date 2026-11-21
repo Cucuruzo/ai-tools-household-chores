@@ -124,9 +124,9 @@ def test_planned_card_id_and_assign_form(client, bins, family):
 
 
 @pytest.mark.django_db
-def test_planned_card_has_no_status_or_delete_and_keeps_its_text(client, bins):
+def test_planned_card_has_no_status_and_keeps_its_text(client, bins):
     body = main(dashboard(client, "2026-W49"))
-    assert '<form class="status"' not in body and "delete-confirm" not in body and "card-block" not in body
+    assert '<form class="status"' not in body and body.count('<details class="delete-confirm">') == 1 and "card-block" not in body
     [card] = cards(body)
     assert (card["id"], card["title"], card["date"], card["points"], card["status"]) == (
         None, "Bins", "Thu, Dec 3", "10 pts", "Planned")

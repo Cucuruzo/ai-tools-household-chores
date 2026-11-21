@@ -141,14 +141,16 @@ columns later.
 | id           | AutoField (PK)                               |
 | chore        | ForeignKey(Chore, on_delete=CASCADE, related_name="exceptions") |
 | date         | DateField                                    |
-| is_cancelled | BooleanField (default False): the date is not shown, and is stored with `is_cancelled=True` when the week is materialized |
+| is_cancelled | BooleanField (default False): the date is not shown, and is stored with `is_cancelled=True` when the week is materialized. Written by "This occurrence only" on a Planned card (#22, `services.cancel_projected_date`); an override on the same row stays but no longer matters |
 | is_override  | BooleanField (default False): `member` replaces the projected member |
 | member       | ForeignKey(Member, nullable, on_delete=SET_NULL): None means Unassigned, so deleting the member leaves an override to Unassigned |
 
 **Unique constraint:** (chore, date), `unique_exception_per_chore_date`
 
 A stored row on the same date always wins. An exception on a date that is not
-on the chore's rule is ignored.
+on the chore's rule is ignored. "This and future" from D (`views._delete_from`,
+every caller: stored card, edit page, Planned card) deletes the chore's
+exceptions dated ≥ D; earlier ones stay (#22).
 
 ### ChoreTemplate
 
@@ -286,7 +288,10 @@ scope. One-off chores ignore `scope` and `occurrence` and save in place
                                           bad pk, another chore's row or a cancelled row: 404
 /chores/<id>/edit/                 POST   save chore edits; recurring: scope=this|future (#20, missing = future,
                                           anything else 400), occurrence=<pk> as on GET
-/chores/<id>/delete/               POST   delete chore (with scope: this/future)
+/chores/<id>/delete/               POST   delete chore (with scope: this/future), from a stored row (`occurrence=<pk>`)
+                                          or a projected date (`date=YYYY-MM-DD`, #22); both given: 400; a bad `date`: 400
+                                          `Invalid date`; a `date` that is not a projected date of the chore for the
+                                          viewer's today: 404
 /chores/create/                    POST   save new chore
 /chores/templates/                 GET    manage household templates
 /chores/templates/<id>/edit/       GET    edit template form
