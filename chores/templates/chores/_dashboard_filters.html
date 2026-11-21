@@ -8,7 +8,8 @@
   {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
   <label for="filter-member">Member
     <select id="filter-member" name="member">
-      <option value=""{% if filter_member == "" %} selected{% endif %}>Everyone</option>
+      {% if selected_members %}<option value=""{% if filter_member == "" %} selected{% endif %}>Chosen in the header</option>{% endif %}
+      <option value="all"{% if filter_member == "all" or filter_member == "" and not selected_members %} selected{% endif %}>Everyone</option>
       {% for m in members %}
         <option value="{{ m.pk }}"{% if filter_member == m.pk %} selected{% endif %}>{{ m.name }}</option>
       {% endfor %}

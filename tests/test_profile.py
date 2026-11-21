@@ -100,6 +100,7 @@ def test_duplicate_names_both_shown_and_highlighted_separately(client):
     assert "🐶" in nav and "🐱" in nav
     switch(client, second)
     assert current_buttons(page(client)) == [str(second.pk)]
+    switch(client, second)
     switch(client, first)
     assert current_buttons(page(client)) == [str(first.pk)]
 
@@ -113,7 +114,7 @@ def test_switch_sets_session_and_redirects_via_next(client):
     response = switch(client, ann, data={"next": "/family/?x=1"})
     assert response.status_code == 302
     assert response["Location"] == "/family/?x=1"
-    assert client.session["active_member_id"] == ann.pk
+    assert client.session["active_member_ids"] == [ann.pk]
     assert current_buttons(page(client)) == [str(ann.pk)]
 
 
@@ -124,7 +125,7 @@ def test_switch_to_already_active_member_clears_it(client):
     response = switch(client, ann, data={"next": FAMILY})
     assert response.status_code == 302
     assert response["Location"] == FAMILY
-    assert "active_member_id" not in client.session
+    assert "active_member_id" not in client.session and "active_member_ids" not in client.session
     nav = switcher(page(client))
     assert "Who are you?" in nav
     assert "aria-current" not in nav and "aria-pressed" not in nav
@@ -152,7 +153,7 @@ def test_external_next_is_blocked(client, target):
     ann = make("Ann")
     response = switch(client, ann, data={"next": target})
     assert response["Location"] == "/"
-    assert client.session["active_member_id"] == ann.pk
+    assert client.session["active_member_ids"] == [ann.pk]
 
 
 @pytest.mark.django_db
@@ -161,7 +162,7 @@ def test_external_referer_is_blocked(client, target):
     ann = make("Ann")
     response = switch(client, ann, HTTP_REFERER=target)
     assert response["Location"] == "/"
-    assert client.session["active_member_id"] == ann.pk
+    assert client.session["active_member_ids"] == [ann.pk]
 
 
 @pytest.mark.django_db
@@ -178,7 +179,7 @@ def test_get_is_405_and_session_unchanged(client):
     ann = make("Ann")
     response = client.get(reverse("profile_switch", args=[ann.pk]))
     assert response.status_code == 405
-    assert "active_member_id" not in client.session
+    assert "active_member_id" not in client.session and "active_member_ids" not in client.session
 
 
 @pytest.mark.django_db
@@ -196,7 +197,7 @@ def test_max_pk_is_still_a_valid_lookup(client):
     make("Ann")
     set_session(client, 2**63 - 1)
     assert client.get(FAMILY).status_code == 200
-    assert "active_member_id" not in client.session
+    assert "active_member_id" not in client.session and "active_member_ids" not in client.session
 
 
 @pytest.mark.django_db
@@ -217,7 +218,7 @@ def test_deleted_active_member_clears_key_and_shows_who_are_you(client):
     nav = switcher(response.content.decode())
     assert "Who are you?" in nav
     assert "aria-current" not in nav
-    assert "active_member_id" not in client.session
+    assert "active_member_id" not in client.session and "active_member_ids" not in client.session
 
 
 @pytest.mark.django_db
@@ -227,7 +228,7 @@ def test_deleted_last_member_shows_add_your_family(client):
     ann.delete()
     nav = switcher(page(client))
     assert "Add your family" in nav
-    assert "active_member_id" not in client.session
+    assert "active_member_id" not in client.session and "active_member_ids" not in client.session
 
 
 @pytest.mark.django_db
@@ -246,7 +247,7 @@ def test_non_integer_session_value_is_treated_as_stale(client, value):
     nav = switcher(response.content.decode())
     assert "Who are you?" in nav
     assert "aria-current" not in nav
-    assert "active_member_id" not in client.session
+    assert "active_member_id" not in client.session and "active_member_ids" not in client.session
 
 
 @pytest.mark.django_db
@@ -267,12 +268,12 @@ def test_get_active_member_helper(rf):
     request = rf.get("/")
     request.session = SessionStore()
     assert get_active_member(request) is None
-    request.session["active_member_id"] = ann.pk
+    request.session["active_member_ids"] = [ann.pk]
     assert get_active_member(request) == ann
-    request.session["active_member_id"] = 999
+    request.session["active_member_ids"] = [999]
     assert get_active_member(request) is None
-    assert "active_member_id" not in request.session
+    assert "active_member_ids" not in request.session
     for bad in (1.5, True, None, 0, -1, 2**63, "1" + "0" * 30):
-        request.session["active_member_id"] = bad
+        request.session["active_member_ids"] = [bad]
         assert get_active_member(request) is None
-        assert "active_member_id" not in request.session
+        assert "active_member_ids" not in request.session

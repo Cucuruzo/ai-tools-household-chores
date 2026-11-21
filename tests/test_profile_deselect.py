@@ -13,7 +13,8 @@ pytestmark = pytest.mark.django_db
 
 WED = datetime.datetime(2026, 11, 18, 12, 0, tzinfo=datetime.timezone.utc)
 HTMX = {"HTTP_HX_REQUEST": "true"}
-KEY = "active_member_id"
+KEY = "active_member_ids"
+LEGACY = "active_member_id"
 NAV = re.compile(r'<nav id="profile-switcher"[^>]*>.*?</nav>', re.S)
 NEXT = re.compile(r'name="next" value="([^"]*)"')
 ACTIVE_BUTTON = re.compile(r'<button type="submit" class="profile active" [^>]*>')
@@ -54,7 +55,7 @@ def nexts(nav):
 
 def set_session(client, value):
     session = client.session
-    session[KEY] = value
+    session[LEGACY] = value
     session.save()
 
 
@@ -98,7 +99,7 @@ def pages(ann, bob):
 def test_clear_from_every_page_type(client, ann, pages):
     for url in pages:
         click(client, ann)
-        assert client.session[KEY] == ann.pk
+        assert client.session[KEY] == [ann.pk]
         value = next_at(client, url)
         response = click(client, ann, next=value)
         assert response.status_code == 302, url
@@ -114,27 +115,28 @@ def test_clear_from_every_page_type(client, ann, pages):
 
 def test_clicks_toggle(client, ann):
     assert click(client, ann).status_code == 302
-    assert client.session[KEY] == ann.pk
+    assert client.session[KEY] == [ann.pk]
     click(client, ann)
     assert KEY not in client.session
     click(client, ann)
-    assert client.session[KEY] == ann.pk
+    assert client.session[KEY] == [ann.pk]
 
 
 def test_nobody_active_click_selects(client, ann):
     click(client, ann, next="/family/")
-    assert client.session[KEY] == ann.pk
+    assert client.session[KEY] == [ann.pk]
 
 
-def test_other_member_switches_and_highlights_only_them(client, ann, bob):
+def test_other_member_is_added_and_both_highlighted(client, ann, bob):
     click(client, ann)
     response = click(client, bob, next="/family/")
     assert response.status_code == 302
-    assert client.session[KEY] == bob.pk
+    assert client.session[KEY] == [ann.pk, bob.pk]
     nav = nav_of(client.get("/family/").content.decode())
-    assert nav.count('aria-pressed="true"') == 1
-    assert len(ACTIVE_BUTTON.findall(nav)) == 1
-    assert "Bob (click to deselect)" in nav and "Ann (click to deselect)" not in nav
+    assert nav.count('aria-pressed="true"') == 2
+    assert len(ACTIVE_BUTTON.findall(nav)) == 2
+    assert "Bob (click to deselect)" in nav and "Ann (click to deselect)" in nav
+    assert '<li id="selection-hint">Done is not credited while several are selected</li>' in nav
 
 
 # --- Stale session -----------------------------------------------------------------
@@ -145,7 +147,7 @@ def test_stale_active_member_then_click_sets_clicked(client, ann, bob):
     ann.delete()
     response = click(client, bob, next="/family/")
     assert response.status_code == 302
-    assert client.session[KEY] == bob.pk
+    assert client.session[KEY] == [bob.pk]
 
 
 @pytest.mark.parametrize("junk", ["abc", None, True, 1.5, "99999999999999999999", "", -3])
@@ -153,7 +155,7 @@ def test_invalid_session_value_then_click_sets_clicked(client, bob, junk):
     set_session(client, junk)
     response = click(client, bob)
     assert response.status_code == 302
-    assert client.session[KEY] == bob.pk
+    assert client.session[KEY] == [bob.pk]
 
 
 # --- 404, 405, CSRF ----------------------------------------------------------------
@@ -167,7 +169,7 @@ def test_unknown_id_is_404_and_session_untouched(client, ann, pk, held):
     response = client.post(f"/profile/{pk}/", {"next": "/family/"})
     assert response.status_code == 404
     if held:
-        assert client.session[KEY] == ann.pk
+        assert client.session[KEY] == [ann.pk]
     else:
         assert KEY not in client.session
 
@@ -175,20 +177,20 @@ def test_unknown_id_is_404_and_session_untouched(client, ann, pk, held):
 def test_unknown_id_does_not_clean_stale_session(client, ann):
     set_session(client, "abc")
     assert client.post("/profile/999/").status_code == 404
-    assert client.session[KEY] == "abc"
+    assert client.session[LEGACY] == "abc"
 
 
 def test_get_is_405_and_member_stays_active(client, ann):
     click(client, ann)
     assert client.get(f"/profile/{ann.pk}/").status_code == 405
-    assert client.session[KEY] == ann.pk
+    assert client.session[KEY] == [ann.pk]
 
 
 def test_missing_csrf_is_403_and_member_stays_active(ann):
     strict = Client(enforce_csrf_checks=True)
     set_session(strict, ann.pk)
     assert strict.post(f"/profile/{ann.pk}/", {"next": "/family/"}).status_code == 403
-    assert strict.session[KEY] == ann.pk
+    assert strict.session[LEGACY] == ann.pk
 
 
 # --- Hostile next / Referer --------------------------------------------------------

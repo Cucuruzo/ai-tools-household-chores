@@ -709,6 +709,8 @@ def test_swapped_block_equals_full_page_block(client, week, data):
     mom = member("Mom", role="adult")
     day = {None: "2026-11-18", "2026-W46": "2026-11-12", "2026-W48": "2026-11-25"}[week]
     o = row(weekly(weekday=d(day).weekday()), day)
+    if "member" not in data:
+        ChoreOccurrence.objects.filter(pk=o.pk).update(member=mom)
     activate(client, mom)
     params = dict(data, **({"week": week} if week else {}))
     form = STATUS_FORM.search(blocks(page(client, week, data=data))[o.pk]).group(2)

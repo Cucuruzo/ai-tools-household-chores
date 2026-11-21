@@ -42,6 +42,8 @@ def _history_url(member, page):
 @require_GET
 def history(request):
     _, member, _ = _dashboard_filters(request.GET)
+    if member == dash.ALL_FILTER:  # history has no header selection to override
+        member = None
     all_rows = _shown_occurrences().filter(
         status__in=[ChoreOccurrence.Status.DONE, ChoreOccurrence.Status.SKIPPED]
     )

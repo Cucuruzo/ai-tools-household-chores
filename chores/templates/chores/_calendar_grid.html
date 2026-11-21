@@ -60,6 +60,10 @@
     </tbody>
   </table>
 
+  {% if selected_members %}
+    <p id="header-filter">Showing chores of {% for m in selected_members %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% endfor %} · chosen in the header</p>
+  {% endif %}
+
   {% if is_empty %}
     <section id="no-chores">
       <p>No chores this month</p>

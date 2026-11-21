@@ -35,6 +35,9 @@
   <p><a id="add-chore" role="button" href="{{ add_chore_url }}">+ Add Chore</a></p>
 
   {% include "chores/_dashboard_filters.html" %}
+  {% if selected_members and filter_member == "" %}
+    <p id="header-filter">Showing chores of {% for m in selected_members %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% endfor %} · chosen in the header</p>
+  {% endif %}
 
   {% if is_empty %}
     <section id="no-chores">

@@ -124,7 +124,7 @@ def test_dashboard_member_filter(client, family, int_mode, value):
     assert len(cards(plain)) == 2
     body = page(client, data={"member": value})
     assert cards(body) == cards(plain)
-    assert 'value="" selected' in body
+    assert '<option value="all" selected>Everyone</option>' in body
     assert 'name="member"' not in re.sub(r"<select.*?</select>", "", body, flags=re.S)
 
 
@@ -133,7 +133,7 @@ def test_dashboard_member_filter_keeps_week_and_day(client, family, int_mode, va
     body = page(client, data={"member": value, "week": "2026-W46", "day": "3"})
     assert 'name="week" value="2026-W46"' in body
     assert re.search(r'<option value="3" selected>', body)
-    assert 'value="" selected' in body
+    assert '<option value="all" selected>Everyone</option>' in body
 
 
 # --- Session active_member_id --------------------------------------------------------------
@@ -149,7 +149,7 @@ def test_session_value_is_a_signed_out_viewer(client, family, int_mode, url, val
     body = response.content.decode()
     assert "Who are you?" in body
     assert 'aria-current="true"' not in re.search(r'<nav id="profile-switcher".*?</nav>', body, re.S).group(0)
-    assert "active_member_id" not in client.session
+    assert "active_member_id" not in client.session and "active_member_ids" not in client.session
 
 
 def test_switcher_still_works_after_a_bad_session_value(client, family, int_mode):

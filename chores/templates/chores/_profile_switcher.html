@@ -1,7 +1,7 @@
 <nav id="profile-switcher" {% if switcher_oob %}hx-swap-oob="true" {% endif %}aria-label="Profile switcher">
   {% if members %}
     <ul>
-      {% if not active_member %}
+      {% if not selected_members %}
         <li id="who-are-you">Who are you?</li>
       {% endif %}
       {% for member in members %}
@@ -9,7 +9,7 @@
           <form method="post" action="{% url 'profile_switch' member.pk %}">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ switcher_next }}">
-            {% if active_member and member.pk == active_member.pk %}
+            {% if member.pk in selected_ids %}
               <button type="submit" class="profile active" aria-pressed="true" title="{{ member.name }} (click to deselect)" aria-current="true">
                 <span class="avatar">{{ member.avatar }}</span> <strong>{{ member.name }}</strong>
               </button>
@@ -21,6 +21,9 @@
           </form>
         </li>
       {% endfor %}
+      {% if selected_members|length > 1 %}
+        <li id="selection-hint">Done is not credited while several are selected</li>
+      {% endif %}
     </ul>
   {% else %}
     <ul><li><a href="{% url 'family' %}">Add your family</a></li></ul>

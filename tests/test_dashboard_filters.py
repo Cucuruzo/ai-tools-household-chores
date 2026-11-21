@@ -118,7 +118,7 @@ def test_deleted_member_rows_are_unassigned(client, week):
     mom.delete()
     assert shown(client, data={"member": "unassigned"})["overdue"] == ["Old", "MonMom"]
     body = fil(client, member=pk)  # unknown pk: Everyone
-    assert 'value="" selected' in body
+    assert '<option value="all" selected>Everyone</option>' in body
     assert titles(sections(body))["upcoming"] == ["FriMom"]
 
 
@@ -246,7 +246,7 @@ def test_invalid_week_fallback_keeps_filters(client, week):
 def test_invalid_member_is_everyone(client, week, value):
     base = page(client)
     body = fil(client, member=value)
-    assert 'value="" selected' in body
+    assert '<option value="all" selected>Everyone</option>' in body
     assert main(body) == main(base)
     if len(value) > 3 and value.lower() != "unassigned":  # that word is a real option label
         for needle in (value, quote(value, safe=""), html.escape(value)):
@@ -280,7 +280,7 @@ def test_repeated_params_last_wins(client, week):
     r = client.get("/dashboard/", {"member": [mom.pk, emma.pk]})
     assert f'<option value="{emma.pk}" selected>' in r.content.decode()
     with_bad = client.get("/dashboard/", {"member": [emma.pk, "abc"]}).content.decode()
-    assert 'value="" selected' in with_bad
+    assert '<option value="all" selected>Everyone</option>' in with_bad
     days = client.get("/dashboard/", {"day": ["2", "9"]}).content.decode()
     assert 'value="" selected' in days and 'name="day"' in days
     assert "day=" not in " ".join(hrefs(days))
@@ -323,7 +323,7 @@ def test_member_options_in_member_order(client):
     member("Bob", order=2)
     opts = options(select(page(client), "member"))
     assert [o[2] for o in opts] == ["Everyone", "Zed", "Amy", "Bob", "Unassigned"]
-    assert opts[0][0] == "" and opts[-1][0] == "unassigned"
+    assert opts[0][0] == "all" and opts[-1][0] == "unassigned"
     assert [o[1] for o in opts] == [" selected", "", "", "", ""]
 
 

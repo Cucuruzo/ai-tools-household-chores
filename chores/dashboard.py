@@ -202,16 +202,21 @@ def mark_past_overdue(cards):
 # --- Filters (#11) -----------------------------------------------------------
 
 UNASSIGNED_FILTER = "unassigned"
+# "Everyone", chosen explicitly: overrides the header selection (#55).
+ALL_FILTER = "all"
 
 
 def parse_member_filter(raw, pk_parser):
-    """``"unassigned"``, a member pk (as an int) or None for "Everyone".
+    """``"unassigned"``, ``"all"``, a member pk (as an int) or None for no
+    filter. Only the exact strings count.
 
     ``pk_parser`` is ``chores.profile._parse_pk``; whether the member exists
     is for the caller to check.
     """
     if raw == UNASSIGNED_FILTER:
         return UNASSIGNED_FILTER
+    if raw == ALL_FILTER:
+        return ALL_FILTER
     return pk_parser(raw)
 
 
@@ -223,13 +228,19 @@ def parse_day_filter(raw):
 
 
 def filter_cards(cards, monday, member, day):
-    """Keep cards of ``member`` (pk or "unassigned") and dated on weekday ``day``."""
+    """Keep cards of ``member`` and dated on weekday ``day``.
+
+    ``member`` is a pk, "unassigned", a frozenset of pks (the header
+    selection, #55: unassigned cards are hidden) or None / "all" for everyone.
+    """
     if day is not None:
         wanted = monday + (day - 1) * ONE_DAY
         cards = [c for c in cards if c.date == wanted]
     if member == UNASSIGNED_FILTER:
         cards = [c for c in cards if c.member is None]
-    elif member is not None:
+    elif isinstance(member, frozenset):
+        cards = [c for c in cards if c.member is not None and c.member.pk in member]
+    elif member is not None and member != ALL_FILTER:
         cards = [c for c in cards if c.member is not None and c.member.pk == member]
     return list(cards)
 

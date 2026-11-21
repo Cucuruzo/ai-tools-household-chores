@@ -21,10 +21,10 @@ from .models import Chore, ChoreOccurrence, Member
 from .profile import (
     MAX_PK,
     _parse_pk,
-    clear_active_member,
     get_active_member,
+    get_selected_members,
     is_valid_pk,
-    set_active_member,
+    toggle_member,
 )
 from .services import (
     ASSIGNMENT_FIELDS, RULE_FIELDS, FutureEditRefused, MoveRefused, OneOffEditRefused, _day_text,
@@ -188,6 +188,20 @@ def _dashboard_filters(params):
     return monday, member, dash.parse_day_filter(params.get("day"))
 
 
+def _shown_member_filter(request, member):
+    """The member filter cards are shown with (#55).
+
+    An explicit ``member`` wins ("all" means everyone); without one the header
+    selection applies as a frozenset of pks; with nothing selected, None.
+    """
+    if member == dash.ALL_FILTER:
+        return None
+    if member is not None:
+        return member
+    selected = get_selected_members(request)
+    return frozenset(m.pk for m in selected) if selected else None
+
+
 def _dashboard_redirect(params):
     """302 back to the dashboard view described by ``params`` (GET or POST data)."""
     monday, member, day = _dashboard_filters(params)
@@ -212,7 +226,8 @@ def dashboard(request):
     today = timezone.localdate(now)
     monday, member_filter, day_filter = _dashboard_filters(request.GET)
     monday = monday or dash.monday_of(today)
-    context = _dashboard_context(monday, today, now, member_filter, day_filter)
+    shown = _shown_member_filter(request, member_filter)
+    context = _dashboard_context(monday, today, now, shown, day_filter)
     context.update(_filter_context(context["nav"], member_filter, day_filter))
     partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
     template = "chores/_dashboard_list.html" if partial else "chores/dashboard.html"
@@ -232,22 +247,29 @@ def dashboard(request):
 # --- Monthly calendar (#14) ----------------------------------------------------
 
 
-def _month_entries(nav, today):
-    """``{date: [(status, due_time, title, chore_id)]}`` for the month shown."""
+def _month_entries(nav, today, selected=None):
+    """``({date: [(status, due_time, title, chore_id)]}, any_at_all)`` for the
+    month shown. ``selected`` (a set of member pks, #55) keeps only their
+    chores; ``any_at_all`` is decided on the unfiltered month."""
     entries = {}
+    any_at_all = False
     stored = _shown_occurrences().filter(date__gte=nav["first"], date__lte=nav["last"])
-    for status, day, due_time, title, chore_id in stored.values_list(
-        "status", "date", "due_time", "title", "chore_id"
+    for status, day, due_time, title, chore_id, member_id in stored.values_list(
+        "status", "date", "due_time", "title", "chore_id", "member_id"
     ):
-        entries.setdefault(day, []).append(
-            (month.dot_status(status, day, today), due_time, title, chore_id)
-        )
+        any_at_all = True
+        if selected is None or member_id in selected:
+            entries.setdefault(day, []).append(
+                (month.dot_status(status, day, today), due_time, title, chore_id)
+            )
     if not nav["is_past"]:
         for p in project_occurrences(nav["first"], nav["last"], today=today):
-            entries.setdefault(p["date"], []).append(
-                (dash.PLANNED, p["due_time"], p["title"], p["chore_id"])
-            )
-    return entries
+            any_at_all = True
+            if selected is None or p["member_id"] in selected:
+                entries.setdefault(p["date"], []).append(
+                    (dash.PLANNED, p["due_time"], p["title"], p["chore_id"])
+                )
+    return entries, any_at_all
 
 
 def _month_url(first, today):
@@ -274,12 +296,12 @@ def _calendar_url(calendar):
     return url + "?month=" + calendar if calendar else url
 
 
-def _calendar_context(first, today):
+def _calendar_context(first, today, selected=None):
     nav = month.month_nav(first, today)
     if nav["is_current"]:
         # Same ``today`` for the Monday and the call, so this never raises.
         materialize_week(dash.monday_of(today), today=today)
-    entries = _month_entries(nav, today)
+    entries, any_at_all = _month_entries(nav, today, selected)
     dashboard_url = reverse("dashboard")
     create_url = reverse("chore_create")
     add_suffix = "&return_to=calendar" + ("" if nav["is_current"] else "&month=" + month.month_param(first))
@@ -302,7 +324,7 @@ def _calendar_context(first, today):
         "nav": nav,
         "weekday_headers": month.WEEKDAY_HEADERS,
         "rows": rows,
-        "is_empty": not entries,
+        "is_empty": not any_at_all,
         "previous_url": _month_url(month.shift_month(first, -1), today) if nav["previous"] else None,
         "next_url": _month_url(month.shift_month(first, 1), today) if nav["next"] else None,
         "this_month_url": reverse("calendar"),
@@ -315,7 +337,9 @@ def _calendar_context(first, today):
 def calendar(request):
     today = timezone.localdate()
     first = month.parse_month(request.GET.get("month"), today) or month.first_of_month(today)
-    context = _calendar_context(first, today)
+    # The calendar has no member filter, so the header selection always applies.
+    selected = {m.pk for m in get_selected_members(request)} or None
+    context = _calendar_context(first, today, selected)
     partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
     template = "chores/_calendar_grid.html" if partial else "chores/calendar.html"
     response = render(request, template, context)
@@ -464,12 +488,8 @@ def profile_switch(request, pk):
     if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
         raise Http404("No such member")
     member = get_object_or_404(Member, pk=pk)
-    # Clicking the active member again deselects them. get_active_member also
-    # drops a stale id first, so a deleted active member never blocks a switch.
-    if get_active_member(request) == member:
-        clear_active_member(request)
-    else:
-        set_active_member(request, member)
+    # Adds the member to the header selection, or removes them (#55).
+    toggle_member(request, member)
     target = request.POST.get("next") or request.headers.get("Referer")
     if not target or not url_has_allowed_host_and_scheme(
         target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
@@ -1000,7 +1020,8 @@ def _toggle_success(request, pk, chore_id):
     card = next((c for c in cards if c.pk == pk), None)
     if card is None:  # removed after the write
         raise Http404("No such occurrence")
-    siblings = dash.filter_cards([c for c in cards if c.pk != pk], nav["monday"], member, day)
+    shown = _shown_member_filter(request, member)
+    siblings = dash.filter_cards([c for c in cards if c.pk != pk], nav["monday"], shown, day)
     context = {"card": card}
     context.update(_filter_context(nav, member, day))
     response = render(request, "chores/_chore_card.html", context)
@@ -1053,11 +1074,12 @@ def _assign_response(request, pk):
     card.overdue = dash.is_overdue(card, today, now)
     monday, member, day = _dashboard_filters(request.POST)
     monday = monday or dash.monday_of(today)
-    if member is None or dash.filter_cards([card], monday, member, None):
+    shown = _shown_member_filter(request, member)
+    if shown is None or dash.filter_cards([card], monday, shown, None):
         context = {"card": card, "card_only": True}
         context.update(_filter_context(dash.week_nav(monday, today), member, day))
         return render(request, "chores/_chore_card.html", context)
-    context = _dashboard_context(monday, today, now, member, day)
+    context = _dashboard_context(monday, today, now, shown, day)
     context.update(_filter_context(context["nav"], member, day))
     response = render(request, "chores/_dashboard_list.html", context)
     response["HX-Retarget"] = "#dashboard-list"
@@ -1121,11 +1143,12 @@ def _planned_assign_response(request, chore, day, today, now):
     [card] = _projected_cards([p], _PoolCache())
     monday, member, day_filter = _dashboard_filters(request.POST)
     monday = monday or dash.monday_of(today)
-    if member is None or dash.filter_cards([card], monday, member, None):
+    shown = _shown_member_filter(request, member)
+    if shown is None or dash.filter_cards([card], monday, shown, None):
         context = {"card": card, "card_only": True}
         context.update(_filter_context(dash.week_nav(monday, today), member, day_filter))
         return render(request, "chores/_chore_card.html", context)
-    context = _dashboard_context(monday, today, now, member, day_filter)
+    context = _dashboard_context(monday, today, now, shown, day_filter)
     context.update(_filter_context(context["nav"], member, day_filter))
     response = render(request, "chores/_dashboard_list.html", context)
     response["HX-Retarget"] = "#dashboard-list"

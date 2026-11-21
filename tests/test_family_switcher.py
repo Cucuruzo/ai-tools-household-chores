@@ -252,4 +252,4 @@ def test_switching_from_synced_header_lands_on_family(client):
     nxt = re.search(r'name="next" value="([^"]+)"', nav(html)).group(1)
     response = client.post(action, {"next": nxt})
     assert response.status_code == 302 and response["Location"] == FAMILY
-    assert client.session["active_member_id"] == ann.pk
+    assert client.session["active_member_ids"] == [ann.pk]

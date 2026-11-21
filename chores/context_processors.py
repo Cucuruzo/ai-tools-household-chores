@@ -1,13 +1,15 @@
 from django.utils import timezone
 
 from .models import Member
-from .profile import get_active_member
+from .profile import get_selected_members
 
 
 def profile(request):
+    selected = get_selected_members(request)
     return {
         "members": list(Member.objects.all()),
-        "active_member": get_active_member(request),
+        "selected_members": selected,
+        "selected_ids": {m.pk for m in selected},
         "switcher_next": request.path,
     }
 
