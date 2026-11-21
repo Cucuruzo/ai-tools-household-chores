@@ -15,9 +15,15 @@ def _parse_pk(raw):
     """Accept only genuine ints or strings of ASCII digits within 1..MAX_PK.
 
     Bools, floats, None, out-of-range values and anything else are rejected.
+    A digit string too long to be a pk (more than ``len(str(MAX_PK))`` digits
+    once leading zeros are stripped) is rejected before ``int()`` sees it, as
+    Python 3.11+ raises ValueError for strings over 4300 digits.
     """
     if isinstance(raw, str) and raw.isascii() and raw.isdigit():
-        raw = int(raw)
+        digits = raw.lstrip("0")
+        if len(digits) > len(str(MAX_PK)):
+            return None
+        raw = int(digits) if digits else 0
     return raw if is_valid_pk(raw) else None
 
 
