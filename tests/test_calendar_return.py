@@ -105,7 +105,7 @@ def test_plus_links_survive_htmx_navigation(client):
 def test_empty_month_link_and_filler_unchanged(client):
     with at(WED):
         text = client.get("/calendar/?month=2027-03").content.decode()
-    assert 'href="/chores/create/">Add a chore' in text
+    assert 'href="/chores/create/?return_to=calendar&amp;month=2027-03">Add a chore' in text
     assert cell(text, 1)["links"]
 
 
