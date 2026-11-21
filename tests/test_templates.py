@@ -176,7 +176,7 @@ def test_migrate_again_reverse_and_reapply():
     call_command("migrate", "chores", "0003_chore_is_builtin", verbosity=0)
     assert Chore.objects.filter(is_builtin=True).count() == 0
     assert Chore.objects.filter(pk=household_tpl.pk).exists()
-    made_from_builtin.refresh_from_db()
+    made_from_builtin.refresh_from_db(fields=["template_source"])
     assert made_from_builtin.template_source is None
 
     call_command("migrate", "chores", verbosity=0)

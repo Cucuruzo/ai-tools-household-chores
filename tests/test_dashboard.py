@@ -138,8 +138,16 @@ def link(body, label):
     return m.groups() if m else None
 
 
+CSRF_VALUE = re.compile(r'(name="csrfmiddlewaretoken" value=")[^"]*"')
+
+
+def blank_csrf(fragment):
+    """Django masks the CSRF token differently on every render (#5)."""
+    return CSRF_VALUE.sub(r'\1"', fragment)
+
+
 def main(body):
-    return MAIN.search(body).group(1)
+    return blank_csrf(MAIN.search(body).group(1))
 
 
 class WriteSpy:
@@ -492,7 +500,7 @@ def test_htmx_partial_equals_full_page_list(client):
     occ("Today job", "2026-11-18")
     partial = page(client, HTTP_HX_REQUEST="true")
     full = page(client)
-    assert partial.strip() == main(full).strip()
+    assert blank_csrf(partial).strip() == main(full).strip()
 
 
 @pytest.mark.django_db
