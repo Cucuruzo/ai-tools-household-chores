@@ -176,6 +176,7 @@ are never scheduled directly.
 /family/                           GET    family management screen
 /family/add/                       POST   add member
 /family/<id>/edit/                 POST   edit member
+/family/<id>/move/?dir=up|down     POST   move member up/down in rotation order
 /family/<id>/delete/               POST   remove member
 
 /contribution/                     GET    contribution / progress view

@@ -1,0 +1,45 @@
+{% extends "chores/base.html" %}
+
+{% block title %}Family · Household Chores{% endblock %}
+
+{% block head %}
+<style>
+  .member-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; }
+  [hidden] { display: none !important; }
+  .member-row .member-view { display: contents; }
+  .member-row .avatar { font-size: 2rem; }
+  .member-row .info { flex: 1; }
+  .member-row .actions { display: flex; gap: 0.5rem; }
+  .member-row .actions button { margin: 0; padding: 0.25rem 0.75rem; }
+  .member-row form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; width: 100%; margin: 0; }
+  .member-row form > * { margin: 0; }
+  .errorlist { color: var(--pico-del-color); list-style: none; padding: 0; margin: 0.25rem 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<section id="family">
+  <h1>Family</h1>
+
+  <div id="member-list">
+    {% for member in members %}
+      {% include "chores/_member_row.html" with form=member.edit_form editing=False is_first=forloop.first is_last=forloop.last %}
+    {% empty %}
+      <p id="no-members">No family members yet</p>
+    {% endfor %}
+  </div>
+
+  <h2>Add a member</h2>
+  <form id="add-member-form" method="post" action="{% url 'member_add' %}"
+        hx-post="{% url 'member_add' %}" hx-target="#family" hx-select="#family" hx-swap="outerHTML">
+    {% csrf_token %}
+    {{ add_form.non_field_errors }}
+    <div class="grid">
+      <label>Name {{ add_form.name }} {{ add_form.name.errors }}</label>
+      <label>Role {{ add_form.role }} {{ add_form.role.errors }}</label>
+      <label>Avatar {{ add_form.avatar }} {{ add_form.avatar.errors }}</label>
+    </div>
+    <button type="submit">Add member</button>
+  </form>
+</section>
+{% endblock %}

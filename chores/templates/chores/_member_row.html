@@ -1,0 +1,39 @@
+<article class="member-row" id="member-{{ member.pk }}">
+  <div class="member-view" {% if editing %}hidden{% endif %}>
+    <span class="avatar">{{ member.avatar }}</span>
+    <div class="info">
+      <strong class="name">{{ member.name }}</strong><br>
+      <small class="role">{{ member.get_role_display }}</small>
+    </div>
+    <div class="actions">
+      {% if not is_first %}
+        <button class="outline secondary" aria-label="Move {{ member.name }} up"
+                hx-post="{% url 'member_move' member.pk %}?dir=up"
+                hx-target="#family" hx-select="#family" hx-swap="outerHTML">↑</button>
+      {% endif %}
+      {% if not is_last %}
+        <button class="outline secondary" aria-label="Move {{ member.name }} down"
+                hx-post="{% url 'member_move' member.pk %}?dir=down"
+                hx-target="#family" hx-select="#family" hx-swap="outerHTML">↓</button>
+      {% endif %}
+      <button class="outline" type="button"
+              onclick="const row = this.closest('.member-row'); row.querySelector('.member-view').hidden = true; row.querySelector('.member-edit').hidden = false;">Edit</button>
+      <button class="outline contrast"
+              hx-post="{% url 'member_delete' member.pk %}"
+              hx-confirm="Remove {{ member.name }}? Their chores will become unassigned."
+              hx-target="#family" hx-select="#family" hx-swap="outerHTML">Remove</button>
+    </div>
+  </div>
+  <form class="member-edit" {% if not editing %}hidden{% endif %}
+        method="post" action="{% url 'member_edit' member.pk %}"
+        hx-post="{% url 'member_edit' member.pk %}" hx-target="closest .member-row" hx-swap="outerHTML">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div>{{ form.name }} {{ form.name.errors }}</div>
+    <div>{{ form.role }} {{ form.role.errors }}</div>
+    <div>{{ form.avatar }} {{ form.avatar.errors }}</div>
+    <button type="submit">Save</button>
+    <button type="button" class="secondary"
+            onclick="this.form.reset(); const row = this.closest('.member-row'); row.querySelector('.member-edit').hidden = true; row.querySelector('.member-view').hidden = false;">Cancel</button>
+  </form>
+</article>
