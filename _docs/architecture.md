@@ -104,6 +104,8 @@ becomes current or when a one-off / ad-hoc chore is added.
 |-------------|----------------------------------------------|
 | id          | AutoField (PK)                               |
 | chore       | ForeignKey(Chore, on_delete=CASCADE)         |
+| title       | CharField(100) — snapshot of the chore's title when stored (#39) |
+| instructions | TextField (blank) — snapshot of the chore's instructions when stored (#39) |
 | member      | ForeignKey(Member, nullable, on_delete=SET_NULL) — can be unassigned |
 | date        | DateField                                    |
 | due_time    | TimeField (nullable)                         |
@@ -223,10 +225,11 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   the viewer's zone (#26). Same rule as #5's delete. A projected card opens
   the page without `occurrence`, so it is edited "from today" (#38).
 - **This occurrence only** (`scope=this`): a stored `todo` row only; it
-  changes `due_time` and `points` with one conditional UPDATE that also sets
-  `is_override=True` (`services.update_occurrence`). Equal values write
-  nothing. Done / skipped rows need an Undo first (400). The member is
-  changed on the card (#13); title, instructions and date are #39 / #40.
+  changes `title`, `instructions`, `due_time` and `points` with one
+  conditional UPDATE that also sets `is_override=True`
+  (`services.update_occurrence`, #39). Equal values write nothing. Done /
+  skipped rows need an Undo first (400). The member is changed on the card
+  (#13); the date is #40.
 - **This and future** (`scope=future`, `services.apply_future_edit`), in one
   transaction:
   - every form field is saved on the chore; `end_date`, `template_source`,
@@ -240,7 +243,8 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   - **follower rows** (todo, not cancelled, not override, date >= D): after a
     rule change, a row no longer on the new rule (`services.on_rule`) is
     deleted and its rotation turn is not given back; the others get the new
-    due time and points, and a new member from `advance_rotation` when an
+    due time and points, the chore's title and instructions (when they
+    differ, #39), and a new member from `advance_rotation` when an
     assignment field (`assignment_mode`, `eligibility`, `assigned_to`)
     changed;
   - **fill**: after a rule change, every new-rule date of the current week
@@ -260,9 +264,11 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   rows, Once → repeating is a plain in-place save (exceptions are left as
   they are), and a switch to Once follows
   [Editing a one-off (#35)](#editing-a-one-off-35).
-- **Accepted costs**: `title` and `instructions` live only on `Chore`, so a
-  rename also shows on rows dated before D (history, contribution, progress,
-  past cards) until #39. After a recurrence change, older rows still count in
+- **Accepted costs**: each stored row keeps a snapshot of the chore's
+  `title` and `instructions` (#39), so a rename from D changes only follower
+  rows; rows before D and done, skipped, cancelled or override rows keep the
+  old title. Planned cards and dots, and `/progress/`, show the chore's
+  current title. After a recurrence change, older rows still count in
   the same streak (6 daily `done` rows and 1 weekly `done` row show 7 in a
   row).
 
@@ -305,8 +311,9 @@ date (only an override can exist for a one-off).
 - One transaction after `Chore.objects.select_for_update()`, as
   `apply_future_edit`. An `IntegrityError` (a concurrent store of the same
   date) rolls the attempt back, turns included, and is retried once.
-- Title and instructions live only on `Chore`, so they also show on a done
-  row (#39).
+- Title and instructions are a snapshot on the row (#39): a todo row due by
+  Sunday gets the chore's new values, and a done, skipped or cancelled row
+  keeps the ones it had when stored.
 
 ## Screens and URL Design
 

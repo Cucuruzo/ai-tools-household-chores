@@ -360,9 +360,10 @@ def test_title_only_writes_no_row(client, family):
     before = fields(r)
     with CaptureQueriesContext(connection) as queries:
         edit(client, c, title="Hoover", instructions="Under the bed")
-    assert writes_to(queries, "chores_choreoccurrence") == []
+    writes = writes_to(queries, "chores_choreoccurrence")
+    assert len(writes) == 1 and writes[0].startswith('UPDATE "chores_choreoccurrence" SET "title" = ')
     assert writes_to(queries, "chores_chore")  # the chore itself is saved
-    assert fields(r) == before
+    assert fields(r) == {**before, "title": "Hoover", "instructions": "Under the bed"}
     assert [day for _, day, *_ in on(page(client), "Hoover")] == ["Fri, Nov 20"]
 
 

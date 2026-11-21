@@ -240,6 +240,10 @@ class ChoreForm(forms.ModelForm):
 class OccurrenceForm(forms.Form):
     """"This occurrence only" (#20): the values one stored row may change."""
 
+    title = forms.CharField(max_length=100, label="Title")
+    instructions = forms.CharField(
+        required=False, label="Instructions", widget=forms.Textarea(attrs={"rows": 3}),
+    )
     due_time = forms.TimeField(
         required=False, label="Due time",
         widget=forms.TimeInput(format="%H:%M", attrs={"type": "time"}),
@@ -252,7 +256,10 @@ class OccurrenceForm(forms.Form):
 
     @classmethod
     def for_row(cls, occurrence):
-        return cls(initial={"due_time": occurrence.due_time, "points": occurrence.points})
+        return cls(initial={
+            "title": occurrence.title, "instructions": occurrence.instructions,
+            "due_time": occurrence.due_time, "points": occurrence.points,
+        })
 
 
 class TemplateForm(ChoreForm):

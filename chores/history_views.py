@@ -51,7 +51,7 @@ def history(request):
     elif member is not None:
         rows = rows.filter(Q(member_id=member) | Q(completed_by_id=member))
     rows = rows.select_related("chore", "member", "completed_by").order_by(
-        "-date", "status", "chore__title", "id"
+        "-date", "status", "title", "id"
     )
     paginator = Paginator(rows, PAGE_SIZE)
     number = _page_number(request.GET.get("page"))

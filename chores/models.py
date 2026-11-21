@@ -93,6 +93,9 @@ class ChoreOccurrence(models.Model):
         SKIPPED = "skipped", "Skipped"
 
     chore = models.ForeignKey(Chore, on_delete=models.CASCADE, related_name="occurrences")
+    # Snapshot of the chore's title / instructions when the row was stored (#39).
+    title = models.CharField(max_length=100)
+    instructions = models.TextField(blank=True)
     member = models.ForeignKey(
         Member, null=True, blank=True, on_delete=models.SET_NULL, related_name="occurrences"
     )
@@ -116,6 +119,14 @@ class ChoreOccurrence(models.Model):
 
     def __str__(self):
         return f"{self.chore} on {self.date}"
+
+    def save(self, *args, **kwargs):
+        # Safety net for rows made outside create_occurrence (admin, test helpers).
+        if self._state.adding and not self.title:
+            self.title = self.chore.title
+            self.instructions = self.chore.instructions
+        super().save(*args, **kwargs)
+
 
 class RotationState(models.Model):
     """Who had the last turn of a rotating chore. Written only by

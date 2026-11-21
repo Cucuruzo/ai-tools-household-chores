@@ -136,6 +136,7 @@ def future(client, c, occurrence=None, when=WED, tz=None, **overrides):
 
 def this(client, c, occurrence, due_time="", points="10", **extra):
     data = {"scope": "this", "occurrence": str(occurrence.pk), "due_time": due_time, "points": points}
+    data.update({"title": occurrence.title, "instructions": occurrence.instructions})
     data.update(extra)
     return post(client, c, data)
 
@@ -345,7 +346,7 @@ def test_one_off_post_ignores_scope_and_occurrence(client, extra):
     assert response["Location"] == url(c)
     c.refresh_from_db()
     assert (c.title, c.points) == ("Renamed", 20)
-    assert values(o) == {**before, "points": 20}
+    assert values(o) == {**before, "points": 20, "title": "Renamed"}
     assert ChoreOccurrence.objects.count() == 1
 
 
@@ -512,9 +513,9 @@ def _race(change):
     """Patch the view's update so ``change(row pk)`` happens just before it."""
     real = update_occurrence
 
-    def racing(occurrence, due_time, points):
+    def racing(occurrence, due_time, points, title, instructions):
         change(occurrence.pk)
-        return real(occurrence, due_time, points)
+        return real(occurrence, due_time, points, title, instructions)
 
     return mock.patch("chores.views.update_occurrence", side_effect=racing)
 
@@ -541,10 +542,10 @@ def test_this_occurrence_race(client, change, code):
 def test_update_occurrence_service():
     c = daily()
     o = row(c, nov(20))
-    assert update_occurrence(o, datetime.time(9), 20) is True
+    assert update_occurrence(o, datetime.time(9), 20, o.title, o.instructions) is True
     assert (values(o)["due_time"], values(o)["points"], values(o)["is_override"]) == (datetime.time(9), 20, True)
     ChoreOccurrence.objects.filter(pk=o.pk).update(status="done")
-    assert update_occurrence(o, datetime.time(10), 5) is False
+    assert update_occurrence(o, datetime.time(10), 5, o.title, o.instructions) is False
 
 
 # --- This and future: worked examples ---------------------------------------------------------
@@ -960,11 +961,11 @@ def test_dashboard_and_history_after_a_rename(client, family):
     text = page(client)
     for day, o in rows.items():
         card = re.search(rf'id="occurrence-{o.pk}">(.*?)</article>', text, re.S).group(1)
-        assert "Wash up" in card
+        assert ("Wash up" if day in (20, 22) else "Dishes") in card
         assert f'<span class="points">{20 if day in (20, 22) else 10} pts</span>' in card
     with at(WED):
         history = client.get("/history/").content.decode()
-    assert "Dishes" not in history and "Wash up" in history
+    assert "Wash up" not in history and "Dishes" in history
     assert values(rows[16])["points"] == 10 and values(rows[16])["status"] == "done"
 
 

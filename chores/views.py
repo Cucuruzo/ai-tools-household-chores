@@ -65,7 +65,7 @@ def _stored_cards(occurrences, pools, today=None):
                 or (chore.end_date is not None and chore.end_date < today)):
             streak = 0
         cards.append(dash.Card(
-            pk=occ.pk, chore_id=occ.chore_id, title=occ.chore.title, date=occ.date,
+            pk=occ.pk, chore_id=occ.chore_id, title=occ.title, date=occ.date,
             due_time=occ.due_time, points=occ.points, status=occ.status, member=occ.member,
             assignee_note=_note(pools, occ.chore, occ.chore.assignment_mode, occ.member, occ.is_override),
             recurring=occ.chore.recurrence != Chore.Recurrence.ONCE,
@@ -221,7 +221,7 @@ def _month_entries(nav, today):
     entries = {}
     stored = _shown_occurrences().filter(date__gte=nav["first"], date__lte=nav["last"])
     for status, day, due_time, title, chore_id in stored.values_list(
-        "status", "date", "due_time", "chore__title", "chore_id"
+        "status", "date", "due_time", "title", "chore_id"
     ):
         entries.setdefault(day, []).append(
             (month.dot_status(status, day, today), due_time, title, chore_id)
@@ -607,7 +607,7 @@ def _scope_context(occurrence, today):
 
 
 def _save_occurrence(request, chore, occurrence, filters, scope):
-    """"This occurrence only" (#20): due time and points of one todo row."""
+    """"This occurrence only" (#20, #39): due time, points, title and instructions of one todo row."""
     if occurrence is None:
         return HttpResponseBadRequest("Choose an occurrence")
     if occurrence.status != ChoreOccurrence.Status.TODO:
@@ -616,7 +616,9 @@ def _save_occurrence(request, chore, occurrence, filters, scope):
     if not form.is_valid():
         scope["occurrence_form"] = form
         return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters, scope=scope)
-    if not update_occurrence(occurrence, form.cleaned_data["due_time"], form.cleaned_data["points"]):
+    data = form.cleaned_data
+    if not update_occurrence(occurrence, data["due_time"], data["points"],
+                             data["title"], data["instructions"]):
         # Lost a race: the row changed after it was read.
         current = ChoreOccurrence.objects.filter(pk=occurrence.pk, chore=chore, is_cancelled=False).first()
         if current is None:

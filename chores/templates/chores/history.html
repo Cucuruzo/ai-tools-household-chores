@@ -23,7 +23,7 @@
     <ul>
       {% for o in items %}
         <li class="history-row" id="history-{{ o.pk }}">
-          <strong class="title">{{ o.chore.title }}</strong>
+          <strong class="title">{{ o.title }}</strong>
           <span class="status">{% if o.status == "done" %}Done{% else %}Skipped{% endif %}</span>
           <span class="points">{% if o.status == "done" %}{{ o.points }} pts{% else %}—{% endif %}</span>
           {% if o.member %}<span class="assignee">Assigned to <span class="avatar">{{ o.member.avatar }}</span> <span class="name">{{ o.member.name }}</span></span>{% else %}<span class="assignee">Unassigned</span>{% endif %}

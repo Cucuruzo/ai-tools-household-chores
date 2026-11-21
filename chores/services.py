@@ -371,7 +371,8 @@ def create_occurrence(chore, day, override_member_id=_ROTATION_MEMBER, is_cancel
 
     The member comes from ``advance_rotation``, which takes (and stores) one
     rotation turn for rotating chores and returns the fixed assignee or None
-    otherwise. ``due_time`` and ``points`` are copied from the chore now.
+    otherwise. ``due_time``, ``points``, ``title`` and ``instructions`` are
+    copied from the chore now (the title is a snapshot, #39).
     An exception (#31) still takes that turn: ``override_member_id`` (a pk
     or None) replaces the member and sets ``is_override``; ``is_cancelled``
     stores the row cancelled, with the rotation member.
@@ -386,6 +387,8 @@ def create_occurrence(chore, day, override_member_id=_ROTATION_MEMBER, is_cancel
         member_id=override_member_id if override else getattr(member, "pk", None),
         due_time=chore.due_time,
         points=chore.points,
+        title=chore.title,
+        instructions=chore.instructions,
         status=ChoreOccurrence.Status.TODO,
         is_override=override,
         is_cancelled=is_cancelled,
@@ -516,22 +519,25 @@ def on_rule(chore, day):
     return False  # once: not a repeating rule
 
 
-def update_occurrence(occurrence, due_time, points):
-    """"This occurrence only": set one todo row's ``due_time`` and ``points``.
+def update_occurrence(occurrence, due_time, points, title, instructions):
+    """"This occurrence only": set one todo row's ``due_time``, ``points``,
+    ``title`` and ``instructions`` (#20, #39).
 
     One conditional update on the row, its chore, ``status="todo"`` and
     ``is_cancelled=False``; it also sets ``is_override``. Nothing is written
-    when both values equal the ones read. Returns False only when the update
-    matched 0 rows (the row changed since it was read), True otherwise.
+    when all four values equal the ones read. Returns False only when the
+    update matched 0 rows (the row changed since it was read), True otherwise.
     """
-    if occurrence.due_time == due_time and occurrence.points == points:
+    if (occurrence.due_time == due_time and occurrence.points == points
+            and occurrence.title == title and occurrence.instructions == instructions):
         return True
     updated = ChoreOccurrence.objects.filter(
         pk=occurrence.pk,
         chore_id=occurrence.chore_id,
         status=ChoreOccurrence.Status.TODO,
         is_cancelled=False,
-    ).update(due_time=due_time, points=points, is_override=True)
+    ).update(due_time=due_time, points=points, title=title,
+             instructions=instructions, is_override=True)
     return updated == 1
 
 
@@ -581,6 +587,10 @@ def _future_edit_attempt(chore, old, day, today):
                 row.due_time = chore.due_time
                 row.points = chore.points
                 fields = ["due_time", "points"]
+                for name in ("title", "instructions"):
+                    if getattr(row, name) != getattr(chore, name):
+                        setattr(row, name, getattr(chore, name))
+                        fields.append(name)
                 if assignment_changed:
                     row.member = advance_rotation(chore)
                     fields.append("member")
@@ -598,7 +608,8 @@ def apply_future_edit(chore, old, day, today):
     In one transaction: the chore is saved (``start_date`` clamped to at least
     D when a rule field changed); follower rows (todo, not cancelled, not
     override, dated D or later) off the new rule are deleted, the others get
-    the new due time and points, and a new member from ``advance_rotation``
+    the new due time and points, the chore's title and instructions when
+    they differ (#39), and a new member from ``advance_rotation``
     when an assignment field changed; after a rule change, the current week
     is filled from ``max(D, current Monday)`` with ``create_occurrence``.
     Nothing dated before D, and no done, skipped, cancelled or override row,
@@ -655,7 +666,8 @@ def _one_off_edit_attempt(chore, old, today):
         if row is not None and due:
             fields = []
             for name, value in (("date", new_date), ("due_time", chore.due_time),
-                                ("points", chore.points)):
+                                ("points", chore.points), ("title", chore.title),
+                                ("instructions", chore.instructions)):
                 if getattr(row, name) != value:
                     setattr(row, name, value)
                     fields.append(name)
@@ -703,7 +715,8 @@ def apply_one_off_edit(chore, old, today):
     edit. ``today`` is the caller's local date; this never reads the clock.
 
     In one transaction, after locking the chore: a todo row dated by this
-    Sunday gets the new date, due time and points (and a new member, with
+    Sunday gets the new date, due time, points, title and instructions (and
+    a new member, with
     ``is_override=False``, after an assignment change); a todo row moved into
     a future week is deleted, keeping its member with an override exception
     when it was an override or the chore rotates. Without a row, a date due

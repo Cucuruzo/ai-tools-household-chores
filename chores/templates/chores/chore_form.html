@@ -38,6 +38,10 @@
       {% if back_url and filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
       {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
       {{ occurrence_form.non_field_errors }}
+      <label for="occ_title">Title</label>
+      {{ occurrence_form.title }} {{ occurrence_form.title.errors }}
+      <label for="occ_instructions">Instructions</label>
+      {{ occurrence_form.instructions }} {{ occurrence_form.instructions.errors }}
       <div class="grid">
         <div>
           <label for="occ_due_time">Due time</label>
