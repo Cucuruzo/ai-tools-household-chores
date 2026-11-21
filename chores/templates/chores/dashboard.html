@@ -13,7 +13,15 @@
 
 {% block content %}
 {% for message in messages %}
-  <p class="message" role="status"><mark>{{ message }}</mark></p>
+  <p class="message" role="status"><mark>{{ message }}</mark></p>{% if message.extra_tags == "undo-delete" and undo_token %}
+  <form class="undo-delete" method="post" action="{% url 'chore_delete_undo' %}">
+    {% csrf_token %}
+    <input type="hidden" name="token" value="{{ undo_token }}">
+    {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+    {% if filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+    {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+    <button type="submit" class="secondary">Undo</button>
+  </form>{% endif %}
 {% endfor %}
 {% include "chores/_dashboard_list.html" %}
 {% endblock %}

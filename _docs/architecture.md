@@ -189,6 +189,10 @@ migration. The three rules:
    **rotation** member, never the override member, and no other date's member
    changes.
 
+Exception: undoing a delete (#24) re-inserts a `RotationState` row that the
+delete cascaded away, with its old id and `last_member`; it never advances or
+edits an existing row.
+
 ## Occurrence Projection Strategy
 
 - Future recurring occurrences are **projected on read**, not stored.
@@ -315,6 +319,27 @@ date (only an override can exist for a one-off).
   Sunday gets the chore's new values, and a done, skipped or cancelled row
   keeps the ones it had when stored.
 
+## Undo a delete (#24)
+
+Every delete through `chore_delete` that wrote something keeps the prior
+state in one slot per browser, `request.session["chore_delete_undo"]`
+(`chores/undo.py`), written after the delete commits and replacing any
+earlier slot; the page only carries its random 32-hex token. The Undo button
+next to "Chore deleted" posts it to `/chores/undo-delete/`, which works for
+600 seconds (UTC) and puts back exactly what that delete changed, with the
+original ids, or nothing (400). Four kinds, the last two decided by whether
+the chore row still exists after the delete:
+
+- `cancel`: a stored row deleted on its own goes back to `is_cancelled=False`.
+- `planned`: a Planned date deleted on its own; its exception is deleted, or
+  an override that was there gets `is_cancelled=False` again.
+- `trim`: the chore stays; `end_date` goes back and the removed to-do rows and
+  exceptions are re-inserted. Refused after an edit of the chore or when a
+  row / exception on those dates was stored since.
+- `chore`: the chore row is gone; it is re-inserted with every row,
+  exception and its `RotationState`. FKs to removed members or templates
+  come back NULL.
+
 ## Screens and URL Design
 
 ```
@@ -344,6 +369,7 @@ date (only an override can exist for a one-off).
                                           or a projected date (`date=YYYY-MM-DD`, #22); both given: 400; a bad `date`: 400
                                           `Invalid date`; a `date` that is not a projected date of the chore for the
                                           viewer's today: 404
+/chores/undo-delete/               POST   undo the last delete (#24)
 /chores/create/                    POST   save new chore
 /chores/templates/                 GET    manage household templates
 /chores/templates/<id>/edit/       GET    edit template form

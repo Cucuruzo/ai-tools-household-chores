@@ -17,6 +17,7 @@ urlpatterns = [
     path('dashboard/assign/planned/<int:chore_id>/', views.planned_assign, name='planned_assign'),
     path('chores/create/', views.chore_create, name='chore_create'),
     path('chores/<int:pk>/edit/', views.chore_edit, name='chore_edit'),
+    path('chores/undo-delete/', views.chore_delete_undo, name='chore_delete_undo'),
     path('chores/<int:pk>/delete/', views.chore_delete, name='chore_delete'),
     path('chores/templates/', template_views.template_list, name='template_list'),
     path('chores/templates/<int:pk>/edit/', template_views.template_edit, name='template_edit'),

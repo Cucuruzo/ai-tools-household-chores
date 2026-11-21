@@ -1,7 +1,8 @@
 import datetime
+import secrets
 
 from django.contrib import messages
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.db.models.functions import Lower
 from django.http import Http404, HttpResponseBadRequest
@@ -14,7 +15,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from . import dashboard as dash
-from . import month
+from . import month, undo
 from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
@@ -205,6 +206,11 @@ def dashboard(request):
     context.update(_filter_context(context["nav"], member_filter, day_filter))
     partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
     template = "chores/_dashboard_list.html" if partial else "chores/dashboard.html"
+    if not partial:
+        # The Undo button next to "Chore deleted" (#24); the slot is only read.
+        token = undo.live_token(request.session.get(undo.SLOT), now)
+        if token is not None:
+            context["undo_token"] = token
     response = render(request, template, context)
     if partial:
         _append_switcher_oob(request, response, context["switcher_next"])
@@ -741,6 +747,7 @@ def chore_delete(request, pk):
     if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
         raise Http404("No such chore")
     today = None
+    undone = None  # (kind, data) of what Undo (#24) puts back, None: nothing written
     with transaction.atomic():
         # Templates are deleted only through template_delete (#23).
         chore = get_object_or_404(Chore.objects.select_for_update(), pk=pk, is_template=False)
@@ -763,29 +770,71 @@ def chore_delete(request, pk):
                 ChoreOccurrence, pk=occurrence_pk, chore=chore, is_cancelled=False
             )
         if chore.recurrence == Chore.Recurrence.ONCE:
+            snap = undo.snapshot(chore)
             # scope is ignored: delete the chore unless it has history.
             if chore.occurrences.filter(status__in=_HISTORY).exists():
                 _end_before(chore, chore.start_date)
             else:
                 chore.delete()
+            undone = undo.after_delete(snap)
         else:
             scope = request.POST.get("scope")
             if scope not in ("this", "future"):
                 return HttpResponseBadRequest("scope must be 'this' or 'future'")
             if scope == "this":
                 if day is not None:
+                    undone = ("planned", {"date": day.isoformat(), "exception": undo.exception_on(chore, day)})
                     cancel_projected_date(chore, day)
                 elif occurrence is None or occurrence.status != ChoreOccurrence.Status.TODO:
                     return HttpResponseBadRequest("Only a to-do occurrence can be deleted on its own")
                 else:
                     occurrence.is_cancelled = True
                     occurrence.save(update_fields=["is_cancelled"])
+                    undone = ("cancel", {"occurrence_id": occurrence.pk})
             else:
                 if today is None:
                     today = timezone.localdate()
                 start = day or (occurrence.date if occurrence else today)
+                snap = undo.snapshot(chore)
                 _delete_from(chore, start, today)
-    messages.success(request, "Chore deleted")
+                undone = undo.after_delete(snap)
+    # Committed: only now does the latest delete replace the undo slot.
+    if undone is None:
+        request.session.pop(undo.SLOT, None)
+        messages.success(request, "Chore deleted")
+    else:
+        request.session[undo.SLOT] = undo.new_slot(undone[0], pk, timezone.now(), undone[1])
+        messages.success(request, "Chore deleted", extra_tags="undo-delete")
+    return _dashboard_redirect(request.POST)
+
+
+@require_POST
+def chore_delete_undo(request):
+    """Undo the latest delete of this browser (#24), within 600 seconds.
+
+    ``token`` must be 32 lowercase hex characters (else 400) and match the
+    session's slot (else 404, slot kept). A malformed or expired slot is a
+    404 and removed. A state that can't be put back exactly is a 400 and
+    the slot is removed. Dates come from the slot; ``localdate`` is never read.
+    """
+    tokens = request.POST.getlist("token")
+    if len(tokens) != 1 or not undo.TOKEN.fullmatch(tokens[0]):
+        return HttpResponseBadRequest("Invalid token")
+    slot = request.session.get(undo.SLOT)
+    if slot is None:
+        raise Http404("Nothing to undo")
+    if isinstance(slot, dict) and isinstance(slot.get("token"), str) \
+            and not secrets.compare_digest(slot["token"].encode(), tokens[0].encode()):
+        raise Http404("Nothing to undo")  # a forged POST leaves the real slot alone
+    if not undo.is_live(slot, timezone.now()):
+        del request.session[undo.SLOT]
+        raise Http404("Nothing to undo")
+    del request.session[undo.SLOT]
+    try:
+        undo.restore(slot)
+    except (undo.Refused, IntegrityError):
+        return HttpResponseBadRequest("This delete can no longer be undone")
+    messages.success(request, "Chore restored")
     return _dashboard_redirect(request.POST)
 
 
