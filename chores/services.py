@@ -216,7 +216,11 @@ def project_occurrences(start, end, today=None):
     a date moved into a later week) is returned with its own title,
     instructions, due time, points and member, and ``is_override=True``; it
     takes no turn, except when it sits on a rule date, which it replaces.
-    Every dict has ``instructions``: the chore's, or the extra's own.
+    A rule date whose exception has ``own_values`` (#38, "edited" or
+    "kept") gets that exception's title, instructions, due time and points
+    the same way and keeps its turn; its member is the override member when
+    ``is_override``, else the rotation member. Every dict has
+    ``instructions``: the chore's, or the exception's own.
 
     Dates with a stored occurrence, and anything before a chore's window
     start, are never returned. Rotating chores simulate the turns that
@@ -232,20 +236,23 @@ def project_occurrences(start, end, today=None):
 
 
 def _exceptions_in(first, end):
-    """``{(chore_id, date): (is_cancelled, is_override, member_id, extra)}``
+    """``{(chore_id, date): (is_cancelled, is_override, member_id, values, moved)}``
     for every exception dated in [first, end]: one query, whatever the range.
-    ``extra`` is None, or ``(title, instructions, due_time, points)`` for an
-    extra (``moved_from`` set, #48)."""
+    ``values`` is None, or ``(title, instructions, due_time, points)`` for an
+    extra (``moved_from`` set, #48) or a date with ``own_values`` (#38).
+    ``moved`` is True only for an extra: only extras are shown off the rule."""
     if end < first:
         return {}
     rows = OccurrenceException.objects.filter(date__gte=first, date__lte=end).values_list(
         "chore_id", "date", "is_cancelled", "is_override", "member_id",
-        "moved_from", "title", "instructions", "due_time", "points",
+        "moved_from", "own_values", "title", "instructions", "due_time", "points",
     )
     return {
         (chore_id, day): (is_cancelled, is_override, member_id,
-                          None if moved_from is None else (title, instructions, due_time, points))
-        for chore_id, day, is_cancelled, is_override, member_id, moved_from, title,
+                          (title, instructions, due_time, points)
+                          if moved_from is not None or own_values else None,
+                          moved_from is not None)
+        for chore_id, day, is_cancelled, is_override, member_id, moved_from, own_values, title,
         instructions, due_time, points in rows
     }
 
@@ -296,7 +303,7 @@ def _project(start, end, today, with_cancelled):
     exceptions = _exceptions_in(max(start, monday), end)
     extras = {}
     for (chore_id, day), exception in exceptions.items():
-        if exception[3] is not None:
+        if exception[4]:  # only ``moved_from`` puts a date on the list off the rule
             extras.setdefault(chore_id, []).append(day)
 
     results = []
@@ -335,16 +342,17 @@ def _project(start, end, today, with_cancelled):
             else:
                 member_id = None
             # The turn above is taken whatever the exception says (rule 7).
-            is_cancelled, is_override, override_member_id, extra = exceptions.get(
-                (chore.pk, day), (False, False, None, None)
+            is_cancelled, is_override, override_member_id, extra, _ = exceptions.get(
+                (chore.pk, day), (False, False, None, None, False)
             )
-            if once:
+            if once:  # a one-off ignores ``moved_from`` and ``own_values``
                 extra = None
             if is_cancelled and not with_cancelled:
                 continue
             if is_override and not is_cancelled:
                 member_id = override_member_id
-            # An extra on a rule date replaces it, and the date keeps its turn.
+            # An extra, or a date with its own values (#38), on a rule date
+            # replaces it, and the date keeps its turn.
             add(_occurrence_dict(chore, day, member_id, bool(is_override and not is_cancelled), extra),
                 is_cancelled, extra is not None, True)
         if once:
@@ -355,7 +363,7 @@ def _project(start, end, today, with_cancelled):
         for day in extras.get(chore.pk, ()):
             if not low <= day <= last_day or on_rule(chore, day):
                 continue
-            is_cancelled, _, member_id, extra = exceptions[(chore.pk, day)]
+            is_cancelled, _, member_id, extra, _ = exceptions[(chore.pk, day)]
             if is_cancelled and not with_cancelled:
                 continue
             add(_occurrence_dict(chore, day, member_id, not is_cancelled, extra),
@@ -461,12 +469,15 @@ def materialize_one_off(chore, today):
 
 
 def _store_extra(chore, o):
-    """Store one extra (#48) of the week, or nothing; returns the row or None.
+    """Store one extra (#48), or one date with its own values (#38), of the
+    week, or nothing; returns the row or None.
 
     Not cancelled: a turn only when it sits on a rule date, then one todo
     row with its own member, title, instructions, due time and points, and
-    ``is_override=True``. Cancelled on a rule date: a cancelled row that
-    takes the turn. Cancelled off the rule: nothing.
+    the projected ``is_override`` (True for an extra or an "edited" date,
+    False for a "kept" date that is not an override, so it stays a follower
+    row). Cancelled on a rule date: a cancelled row that takes the turn.
+    Cancelled off the rule: nothing.
     """
     if o["is_cancelled"]:
         if o["takes_turn"]:
@@ -477,7 +488,7 @@ def _store_extra(chore, o):
     return ChoreOccurrence.objects.create(
         chore=chore, date=o["date"], member_id=o["member_id"], due_time=o["due_time"],
         points=o["points"], title=o["title"], instructions=o["instructions"],
-        status=ChoreOccurrence.Status.TODO, is_override=True,
+        status=ChoreOccurrence.Status.TODO, is_override=o["is_override"],
     )
 
 
@@ -487,9 +498,10 @@ def _materialize_attempt(week_start, today):
         projected = project_occurrences(week_start, sunday, today=today)
         # Dates cancelled in advance are hidden from projection but are still
         # stored (cancelled) and still take their turn. Extras (#48) need
-        # ``takes_turn``, so they come from the second projection too.
+        # ``takes_turn``, so they come from the second projection too, and so
+        # do dates with their own values (#38), stored by ``_store_extra``.
         if OccurrenceException.objects.filter(
-            Q(is_cancelled=True) | Q(moved_from__isnull=False),
+            Q(is_cancelled=True) | Q(moved_from__isnull=False) | ~Q(own_values=""),
             date__gte=week_start, date__lte=sunday,
         ).exists():
             special = [
@@ -581,6 +593,19 @@ def set_occurrence_status(occurrence, action, credited_member, now):
 # Fields of a chore that decide which dates it falls on, and who gets them.
 RULE_FIELDS = ("start_date", "recurrence", "recurrence_day")
 ASSIGNMENT_FIELDS = ("assignment_mode", "eligibility", "assigned_to_id")
+# Values a projected date can carry on its own exception (#38).
+VALUE_FIELDS = ("title", "instructions", "due_time", "points")
+# "This and future" from a Planned date keeps at most this many dates before it.
+MAX_KEPT_DATES = 366
+
+
+class FutureEditRefused(Exception):
+    """A "this and future" edit from a Planned date that can't be saved (#38).
+
+    ``str(error)`` is the non-field error shown above the chore form.
+    """
+
+    SCHEDULE = "The schedule can only change from today. Use Edit from today."
 
 
 def on_rule(chore, day):
@@ -623,13 +648,81 @@ def update_occurrence(occurrence, due_time, points, title, instructions):
     return updated == 1
 
 
+def _keep_planned_dates(chore, day, today, values_changed, assignment_changed):
+    """Pin the projected dates of ``chore`` in [next Monday, ``day`` - 1] as
+    they show now (#38). Call it before the chore's new values are saved.
+
+    The current week is materialized first. When a value changed, each date
+    gets the values it shows and ``own_values="kept"`` (an extra, or a date
+    that already has ``own_values``, keeps what it has). When an assignment
+    changed, each date that is not yet an override gets ``is_override=True``
+    and the member it shows. New exceptions go in one ``bulk_create``.
+    """
+    monday = _monday_of(today)
+    first, last = monday + 7 * ONE_DAY, day - ONE_DAY
+    materialize_week(monday, today=today)
+    shown = [o for o in _project(first, last, today, with_cancelled=False) if o["chore_id"] == chore.pk]
+    existing = {
+        e.date: e for e in OccurrenceException.objects.select_for_update().filter(
+            chore_id=chore.pk, date__gte=first, date__lte=last)
+    }
+    new, changed = [], []
+    for o in shown:
+        exception = existing.get(o["date"])
+        if exception is None:
+            exception = OccurrenceException(chore_id=chore.pk, date=o["date"])
+        dirty = False
+        if values_changed and exception.moved_from is None and not exception.own_values:
+            exception.own_values = "kept"
+            for name in VALUE_FIELDS:
+                setattr(exception, name, o[name])
+            dirty = True
+        if assignment_changed and not exception.is_override:
+            exception.is_override, exception.member_id = True, o["member_id"]
+            dirty = True
+        if exception.pk is None:
+            new.append(exception)
+        elif dirty:
+            changed.append(exception)
+    if changed:
+        OccurrenceException.objects.bulk_update(
+            changed, ["own_values", *VALUE_FIELDS, "is_override", "member_id"])
+    if new:
+        OccurrenceException.objects.bulk_create(new)
+
+
+def _clear_kept(chore, day):
+    """The chore's "kept" exceptions dated on or after ``day`` give way (#38):
+    one that is neither an override nor cancelled is deleted, any other gets
+    ``own_values=""``."""
+    kept = OccurrenceException.objects.filter(chore_id=chore.pk, own_values="kept", date__gte=day)
+    kept.filter(is_override=False, is_cancelled=False).delete()
+    kept.update(own_values="")
+
+
 def _future_edit_attempt(chore, old, day, today):
     with transaction.atomic():
-        Chore.objects.select_for_update().filter(pk=chore.pk).first()
+        stored = Chore.objects.select_for_update().filter(pk=chore.pk).first()
         rule_changed = any(getattr(chore, f) != old[f] for f in RULE_FIELDS)
         assignment_changed = any(getattr(chore, f) != old[f] for f in ASSIGNMENT_FIELDS)
-        if rule_changed:
+        if day > _monday_of(today) + 6 * ONE_DAY:
+            # From a Planned date (#38): the rule stays, earlier dates are pinned.
+            if rule_changed:
+                raise FutureEditRefused(FutureEditRefused.SCHEDULE)
+            values_changed = stored is not None and any(
+                getattr(chore, f) != getattr(stored, f) for f in VALUE_FIELDS)
+            if values_changed or assignment_changed:
+                base = chore if stored is None else stored
+                first = max(_monday_of(today) + 7 * ONE_DAY, base.start_date)
+                last = _last_projectable_date(base, day - ONE_DAY)
+                if _count_rule_dates(base, first, last, True) > MAX_KEPT_DATES:
+                    raise FutureEditRefused(
+                        f"More than {MAX_KEPT_DATES} planned dates come before {_day_text(day, today)}. "
+                        "Pick an earlier date, or use Edit from today.")
+                _keep_planned_dates(base, day, today, values_changed, assignment_changed)
+        elif rule_changed:
             chore.start_date = max(chore.start_date, day)
+        _clear_kept(chore, day)
         chore.save()
 
         followers = list(
@@ -688,21 +781,88 @@ def apply_future_edit(chore, old, day, today):
     edit. ``today`` is the caller's local date; this never reads the clock.
 
     In one transaction: the chore is saved (``start_date`` clamped to at least
-    D when a rule field changed); follower rows (todo, not cancelled, not
-    override, dated D or later) off the new rule are deleted, the others get
+    D when a rule field changed, D up to this Sunday); follower rows (todo,
+    not cancelled, not override, dated D or later) off the new rule are
+    deleted, the others get
     the new due time and points, the chore's title and instructions when
     they differ (#39), and a new member from ``advance_rotation``
     when an assignment field changed; after a rule change, the current week
     is filled from ``max(D, current Monday)`` with ``create_occurrence``.
     Nothing dated before D, and no done, skipped, cancelled or override row,
-    is written. A concurrent materialization that stores a fill date first
-    makes the attempt roll back (rotation turns included); it is retried
+    is written. In every such edit the chore's "kept" exceptions dated D or
+    later give way (``_clear_kept``, #38).
+
+    D after this Sunday (a Planned date, #38): a rule change raises
+    ``FutureEditRefused`` and writes nothing. When a value field (compared
+    with the chore as stored) or an assignment field changed, the projected
+    dates in [next Monday, D - 1] are pinned as they show now
+    (``_keep_planned_dates``, after materializing the current week); more
+    than ``MAX_KEPT_DATES`` rule dates there raise ``FutureEditRefused``
+    instead, before anything is written. Extras and "edited" exceptions are
+    never written, and an override always keeps its member; ``RotationState``
+    is written only by that materialization.
+
+    A concurrent materialization that stores a fill date first makes the
+    attempt roll back (rotation turns included); it is retried
     once from a fresh read, as ``materialize_week`` does.
     """
     try:
         return _future_edit_attempt(chore, old, day, today)
     except IntegrityError:
         return _future_edit_attempt(chore, old, day, today)
+
+
+# --- Editing one Planned date (#38) ----------------------------------------------
+
+
+def edit_projected_date(chore, day, title, instructions, due_time, points, today):
+    """"This occurrence only" on projected date ``day`` (D) of a recurring chore (#38).
+
+    ``today`` is the caller's local date; this never reads the clock. In one
+    transaction, after locking the chore: returns False when D is not a
+    projected date after this Sunday (nothing written). Values equal to what
+    D shows write nothing. An extra (#48) only gets the four values. Any
+    other date's ``(chore, D)`` exception, created when there is none, gets
+    the four values and ``own_values="edited"``, plus ``is_override=True``
+    and the member D shows when it was not yet an override (a #31 override
+    keeps its member). No ChoreOccurrence or RotationState is written. An
+    ``IntegrityError`` (a concurrent insert of the same exception) rolls the
+    attempt back and it is retried once from a fresh read.
+    """
+    posted = {"title": title, "instructions": instructions, "due_time": due_time, "points": points}
+    for attempt in range(2):
+        try:
+            with transaction.atomic():
+                locked = Chore.objects.select_for_update().filter(pk=chore.pk, is_template=False).first()
+                if (locked is None or locked.recurrence == Chore.Recurrence.ONCE
+                        or day <= _monday_of(today) + 6 * ONE_DAY):
+                    return False
+                projected = projected_occurrence(locked, day, today)
+                if projected is None:
+                    return False
+                if all(projected[name] == posted[name] for name in VALUE_FIELDS):
+                    return True
+                exception = OccurrenceException.objects.select_for_update().filter(
+                    chore_id=locked.pk, date=day).first()
+                if exception is None:
+                    OccurrenceException.objects.create(
+                        chore=locked, date=day, own_values="edited", is_override=True,
+                        member_id=projected["member_id"], **posted)
+                    return True
+                for name in VALUE_FIELDS:
+                    setattr(exception, name, posted[name])
+                fields = list(VALUE_FIELDS)
+                if exception.moved_from is None:  # an extra only changes its four values
+                    exception.own_values = "edited"
+                    fields.append("own_values")
+                    if not exception.is_override:  # a #31 override keeps its member
+                        exception.is_override, exception.member_id = True, projected["member_id"]
+                        fields += ["is_override", "member_id"]
+                exception.save(update_fields=fields)
+                return True
+        except IntegrityError:
+            if attempt:
+                raise
 
 
 # --- Editing a one-off (#35) ------------------------------------------------------

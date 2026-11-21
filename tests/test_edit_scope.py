@@ -216,9 +216,9 @@ def test_one_off_and_projected_cards_keep_the_plain_link(client):
     one = occ("Once", nov(18)).chore
     assert HREF.findall(page(client)) == [f"/chores/{one.pk}/edit/"]
     weekly_chore = weekly("Trash", 3, "2026-11-04")
-    assert HREF.findall(page(client, week="2026-W48")) == [f"/chores/{weekly_chore.pk}/edit/?week=2026-W48"]
+    assert HREF.findall(page(client, week="2026-W48")) == [f"/chores/{weekly_chore.pk}/edit/?week=2026-W48&amp;planned=2026-11-26"]
     assert HREF.findall(page(client, week="2026-W48", data={"day": "4"})) == [
-        f"/chores/{weekly_chore.pk}/edit/?week=2026-W48&amp;day=4"]
+        f"/chores/{weekly_chore.pk}/edit/?week=2026-W48&amp;day=4&amp;planned=2026-11-26"]
 
 
 # --- Entry points: occurrence validation and D ------------------------------------------

@@ -149,7 +149,9 @@ class OccurrenceException(models.Model):
     not on the chore's rule is ignored. Either kind still takes its rotation
     turn (rotation rule 7). An "extra" (``moved_from`` set, #48) is a date
     moved into a later week: an override with its own title, instructions,
-    due time and points that takes no rotation turn.
+    due time and points that takes no rotation turn. A date with
+    ``own_values`` set (#38) shows its own values on a rule date and keeps
+    its turn.
     """
 
     chore = models.ForeignKey(Chore, on_delete=models.CASCADE, related_name="exceptions")
@@ -162,7 +164,14 @@ class OccurrenceException(models.Model):
     )
     # Set only on an extra (#48): the date the occurrence was first moved from.
     moved_from = models.DateField(null=True, blank=True)
-    # Read only on an extra: its own values, a snapshot like a stored row's (#39).
+    # A date that was not moved but carries its own values (#38): "edited" by
+    # "This occurrence only" on a Planned date (also an override), or "kept"
+    # by "this and future" from a later date (the values it showed before).
+    own_values = models.CharField(
+        max_length=6, blank=True, default="", choices=[("edited", "Edited"), ("kept", "Kept")]
+    )
+    # Read on an extra or a date with ``own_values``: its own values, a
+    # snapshot like a stored row's (#39).
     title = models.CharField(max_length=100, blank=True, default="")
     instructions = models.TextField(blank=True, default="")
     due_time = models.TimeField(null=True, blank=True)

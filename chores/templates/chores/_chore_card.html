@@ -2,7 +2,8 @@
   One chore occurrence (#10). Stored cards carry id="occurrence-<pk>" for
   #5, #12 and #13; projected cards (status "Planned") carry
   id="planned-<chore_id>-<YYYY-MM-DD>" (#31) and are followed directly by
-  their own "Assigned to" form, then their Delete confirmation (#22): the
+  their own "Assigned to" form (a recurring chore's title links to the
+  edit page with planned=<date>, #38), then their Delete confirmation (#22): the
   same <details> as a stored card's, posting a hidden date (no occurrence)
   with "This occurrence only" / "This and all future occurrences" (one-off:
   "Delete"). No wrapper, no Done/Skip. A recurring chore's Planned card then
@@ -20,7 +21,7 @@
 {% if card.pk and not card_only %}<div class="card-block" id="card-{{ card.pk }}">
 {% endif %}<article class="chore-card" id="{% if card.pk %}occurrence-{{ card.pk }}{% else %}planned-{{ card.chore_id }}-{{ card.date|date:'Y-m-d' }}{% endif %}"{% if card_oob %} hx-swap-oob="true"{% endif %}>
   <p class="title">
-    <strong><a href="{% url 'chore_edit' card.chore_id %}{{ return_query }}{% if card.pk and card.recurring %}{% if return_query %}&amp;{% else %}?{% endif %}occurrence={{ card.pk }}{% endif %}">{% if card.struck %}<s>{{ card.title }}</s>{% else %}{{ card.title }}{% endif %}</a></strong>
+    <strong><a href="{% url 'chore_edit' card.chore_id %}{{ return_query }}{% if card.recurring %}{% if return_query %}&amp;{% else %}?{% endif %}{% if card.pk %}occurrence={{ card.pk }}{% else %}planned={{ card.date|date:'Y-m-d' }}{% endif %}{% endif %}">{% if card.struck %}<s>{{ card.title }}</s>{% else %}{{ card.title }}{% endif %}</a></strong>
   </p>
   <p class="assignee">
     {% if card.member %}<span class="avatar">{{ card.member.avatar }}</span> <span class="name">{{ card.member.name }}</span>{% else %}<span class="unassigned">{{ card.assignee_note }}</span>{% endif %}

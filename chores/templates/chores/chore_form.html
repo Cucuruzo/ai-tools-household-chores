@@ -62,6 +62,35 @@
     <p>This occurrence is {% if scope_occurrence.status == "done" %}done{% else %}skipped{% endif %}. Undo it on the dashboard to change it on its own.</p>
     {% endif %}
   </section>
+  {% elif scope_planned %}
+  {# #38: one Planned date of a recurring chore, opened from its card. No Date field: it moves on its card (#48). #}
+  <section id="this-occurrence">
+    <h2>This occurrence only</h2>
+    <p><time datetime="{{ scope_planned.date|date:'Y-m-d' }}">{{ scope_planned.date|date:"D j M" }}</time></p>
+    <form id="occurrence-form" method="post" action="{% url 'chore_edit' chore.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="planned" value="{{ scope_planned.date|date:'Y-m-d' }}">
+      {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+      {% if back_url and filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+      {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+      {{ occurrence_form.non_field_errors }}
+      <label for="occ_title">Title</label>
+      {{ occurrence_form.title }} {{ occurrence_form.title.errors }}
+      <label for="occ_instructions">Instructions</label>
+      {{ occurrence_form.instructions }} {{ occurrence_form.instructions.errors }}
+      <div class="grid">
+        <div>
+          <label for="occ_due_time">Due time</label>
+          {{ occurrence_form.due_time }} {{ occurrence_form.due_time.errors }}
+        </div>
+        <div>
+          <label for="occ_points">Points</label>
+          {{ occurrence_form.points }} {{ occurrence_form.points.errors }}
+        </div>
+      </div>
+      <button type="submit" name="scope" value="this">Save this occurrence</button>
+    </form>
+  </section>
   {% endif %}
 
   <div id="chore-form-area">
@@ -75,6 +104,7 @@
     {% if return_month %}<input type="hidden" name="month" value="{{ return_month }}">{% endif %}
     {% if not chore and not editing_template %}{{ form.template }}{% endif %}
     {% if scope_occurrence %}<input type="hidden" name="occurrence" value="{{ scope_occurrence.pk }}">{% endif %}
+    {% if scope_planned %}<input type="hidden" name="planned" value="{{ scope_planned.date|date:'Y-m-d' }}">{% endif %}
     {{ form.non_field_errors }}
 
     <label for="{{ form.title.id_for_label }}">Title</label>
@@ -144,6 +174,7 @@
 
     {% if scope_day %}
     <p id="scope-note">Changes apply from <time datetime="{{ scope_day|date:'Y-m-d' }}">{{ scope_day|date:"D j M" }}</time>. Earlier occurrences keep their values.</p>
+    {% if edit_from_today_url %}<p><a id="edit-from-today" href="{{ edit_from_today_url }}">Edit from today</a></p>{% endif %}
     <button type="submit" name="scope" value="future">Save this and future occurrences</button>
     {% else %}
     <button type="submit">{% if editing_template %}Save template{% else %}Save chore{% endif %}</button>

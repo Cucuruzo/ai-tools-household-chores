@@ -135,8 +135,8 @@ writes `last_member`; `services.next_member` is read-only (used by projection).
 
 A per-date change to a **projected** (not yet stored) occurrence (#31). It is
 applied when projecting and used up when the week is materialized. #22 (delete
-a projected date) reuses it, and #38 can add nullable `due_time` / `points`
-columns later.
+a projected date) reuses it, and #38 lets a date that was not moved carry its
+own values (`own_values`, migration `0012_occurrenceexception_own_values`).
 
 | Field        | Type                                         |
 |--------------|----------------------------------------------|
@@ -147,10 +147,11 @@ columns later.
 | is_override  | BooleanField (default False): `member` replaces the projected member |
 | member       | ForeignKey(Member, nullable, on_delete=SET_NULL): None means Unassigned, so deleting the member leaves an override to Unassigned |
 | moved_from   | DateField (nullable): set only on an **extra** (#48), a date moved into a later week. It is the date the occurrence was first moved from |
-| title        | CharField(100, blank, default ""): read only on an extra, its own title |
-| instructions | TextField (blank, default ""): read only on an extra, its own instructions |
-| due_time     | TimeField (nullable): read only on an extra, its own due time |
-| points       | IntegerField (nullable): read only on an extra, its own points |
+| own_values   | CharField(6, blank, default "", choices `edited` / `kept`, #38): `""` no values of its own; `"edited"` written by "This occurrence only" on a Planned date (always also an override); `"kept"` written by "this and future" from a later Planned date, holding the values the date showed before (an override only when an assignment change froze its member) |
+| title        | CharField(100, blank, default ""): read only on an extra or a date with `own_values`, its own title |
+| instructions | TextField (blank, default ""): read only on an extra or a date with `own_values`, its own instructions |
+| due_time     | TimeField (nullable): read only on an extra or a date with `own_values`, its own due time |
+| points       | IntegerField (nullable): read only on an extra or a date with `own_values`, its own points |
 
 **Unique constraint:** (chore, date), `unique_exception_per_chore_date`
 
@@ -221,12 +222,23 @@ edits an existing row.
   cancelled extra is not returned; for a one-off chore `moved_from` is
   ignored. Every projected dict has an `instructions` key: the chore's, or
   the extra's own (Planned cards show it).
+- A rule date whose exception has **`own_values`** (`"edited"` / `"kept"`,
+  #38) is applied like an extra on a rule date: it shows the exception's
+  title, instructions, due time and points and keeps its turn. Its member is
+  the override member when `is_override`, else the rotation member, and
+  `is_override` in the dict is True only for an override. Off the rule it is
+  ignored (only `moved_from` puts a date on the list of extras off the rule),
+  and a one-off ignores it. The dict keys and the query count do not change.
 - They are **consumed at materialization**: `materialize_week` stores an
   override as a row with that member and `is_override=True`, and a cancelled
   date as a row with `is_cancelled=True`. Each one still calls
   `advance_rotation`. An extra is stored by `_store_extra`: a todo row with
   its own values and `is_override=True`, taking a turn only on a rule date
-  (a cancelled extra off the rule stores nothing). Then every exception
+  (a cancelled extra off the rule stores nothing). A date with
+  `own_values` is stored by `_store_extra` too, with the projected
+  `is_override`: an "edited" date (or a frozen "kept" one) as an override, a
+  "kept" date that is not an override with `is_override=False`, so it stays a
+  follower row for later edits. Then every exception
   dated on or before that Sunday is deleted in the same transaction.
 - `services.projected_occurrence(chore, day, today)` is the only way views
   decide "D is a projected date of this chore".
@@ -242,8 +254,9 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   on. Points are a snapshot on each row (#15), so past totals never change.
 - **Cutoff D**: the date of the row given as `?occurrence=<pk>` (the card's
   title link carries it for stored cards of recurring chores), else today in
-  the viewer's zone (#26). Same rule as #5's delete. A projected card opens
-  the page without `occurrence`, so it is edited "from today" (#38).
+  the viewer's zone (#26). Same rule as #5's delete. A Planned card of a
+  recurring chore links to `?<filters>&planned=YYYY-MM-DD` (#38), and D is
+  that date; see [Editing a Planned date (#38)](#editing-a-planned-date-38).
 - **This occurrence only** (`scope=this`): a stored `todo` row only; it
   changes `title`, `instructions`, `due_time` and `points` with one
   conditional UPDATE that also sets `is_override=True`
@@ -294,7 +307,48 @@ keeping their row in sync (see [Editing a one-off (#35)](#editing-a-one-off-35))
   row). Stored cards and history show the row's own instructions, and Planned
   cards the chore's current ones (#47). An extra (#48) keeps its member,
   title, instructions, due time and points through later edits: "this and
-  future" never writes exceptions.
+  future" never writes an extra; from a Planned date it only pins the dates before D (#38).
+
+## Editing a Planned date (#38)
+
+The edit page with `planned=D` (`views._edit_planned`): D must be a
+projected date of the chore after this Sunday for the viewer's today (#26),
+else 404 "Not a planned date of this chore" (GET and POST). `occurrence` and
+`planned` together are a 400. A one-off ignores `planned`. The scope note
+reads "Changes apply from Thu 10 Dec. …" and is followed by
+`#edit-from-today` (the same page without `planned`). GET writes nothing.
+
+- **This occurrence only** (`services.edit_projected_date`): Title,
+  Instructions, Due time and Points, no Date field (a Planned date moves on
+  its card, #48; a posted `date` is ignored). Equal values write nothing. An
+  extra only gets its four values; any other date's exception gets them,
+  `own_values="edited"`, and, when it was not yet an override,
+  `is_override=True` with the member D shows (a #31 override keeps its
+  member). No `ChoreOccurrence` or `RotationState` is written. Redirect to
+  `?<filters>&planned=D`, "Occurrence saved".
+- **This and future from D** (`apply_future_edit`, in place):
+  1. A rule change (`start_date`, `recurrence`, `recurrence_day`, or a
+     switch to Once) is refused (`FutureEditRefused`): "The schedule can
+     only change from today. Use Edit from today." as a non-field error,
+     status 200, nothing written.
+  2. When a value field (`VALUE_FIELDS`, compared with the chore as stored)
+     or an assignment field changed, the projected dates in [next Monday,
+     D - 1] are pinned (`_keep_planned_dates`): more than `MAX_KEPT_DATES`
+     (366) rule dates there are refused first ("More than 366 planned dates
+     come before …"). The current week is materialized, then each date gets
+     the values it shows with `own_values="kept"` (an extra or a date that
+     already has `own_values` keeps what it has) and, after an assignment
+     change, `is_override=True` with the member it shows (unless it is
+     already an override).
+  3. In every "this and future" edit (from today, a stored row or a Planned
+     date) the chore's `"kept"` exceptions dated on or after D give way
+     (`_clear_kept`): deleted when neither override nor cancelled, else
+     `own_values=""`.
+  4. The chore is saved in place; redirect to `?<filters>&planned=D`.
+- **Accepted cost**: after an assignment change from D, the new pool's
+  rotation counts every date from the window start, so a member can get two
+  dates in a row (Emma on Thu 3 and Thu 10 in the Bins example); the frozen
+  overrides keep their member through later edits, like a #13 reassignment.
 
 ## Moving one occurrence (#40)
 

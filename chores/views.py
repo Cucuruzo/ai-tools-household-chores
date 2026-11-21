@@ -20,8 +20,9 @@ from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
 from .services import (
-    ASSIGNMENT_FIELDS, RULE_FIELDS, MoveRefused, OneOffEditRefused, _day_text, apply_future_edit,
-    apply_one_off_edit, cancel_projected_date, eligible_pool, materialize_one_off,
+    ASSIGNMENT_FIELDS, RULE_FIELDS, FutureEditRefused, MoveRefused, OneOffEditRefused, _day_text,
+    apply_future_edit, apply_one_off_edit, cancel_projected_date, edit_projected_date,
+    eligible_pool, materialize_one_off,
     materialize_week, move_occurrence, move_projected_date, project_occurrences,
     projected_occurrence, set_occurrence_status, set_projected_member, update_occurrence,
 )
@@ -465,14 +466,17 @@ def profile_switch(request, pk):
     return redirect(target)
 
 
-def _edit_url(pk, filters, occurrence=None):
-    """The edit page's URL with #27's query, plus ``occurrence=`` when given."""
+def _edit_url(pk, filters, occurrence=None, planned=None):
+    """The edit page's URL with #27's query, plus ``occurrence=`` or
+    ``planned=YYYY-MM-DD`` (#38) when given."""
     url = reverse("chore_edit", args=[pk])
     if filters is not None:
         monday, member, day = filters
         url += dash.dashboard_query(dash.week_param(monday) if monday else None, member, day)
     if occurrence is not None:
         url += ("&" if "?" in url else "?") + f"occurrence={occurrence.pk}"
+    if planned is not None:
+        url += ("&" if "?" in url else "?") + f"planned={planned.isoformat()}"
     return url
 
 
@@ -506,7 +510,11 @@ def _chore_form_page(request, form, chore=None, start_date=None, filters=None, s
         context["switcher_next"] = _create_url(start_date, template, recurrence, filters, calendar)
     else:
         occurrence = scope.get("scope_occurrence") if scope else None
-        context["switcher_next"] = _edit_url(chore.pk, filters, occurrence)
+        planned = scope.get("scope_planned") if scope else None
+        context["switcher_next"] = _edit_url(
+            chore.pk, filters, occurrence, planned["date"] if planned else None)
+        if planned is not None:  # #38: the same page, cut off at today
+            context["edit_from_today_url"] = _edit_url(chore.pk, filters)
     if scope is not None:  # a recurring chore's edit scope (#20)
         context.update(scope)
     if filters is not None:  # normalized (monday, member, day) from the dashboard (#27)
@@ -539,9 +547,10 @@ def _chore_form_page(request, form, chore=None, start_date=None, filters=None, s
     return render(request, "chores/chore_form.html", context)
 
 
-def _edit_redirect(pk, filters, occurrence=None):
-    """302 to the edit page with #27's query, plus ``occurrence=`` when given."""
-    return redirect(_edit_url(pk, filters, occurrence))
+def _edit_redirect(pk, filters, occurrence=None, planned=None):
+    """302 to the edit page with #27's query, plus ``occurrence=`` or
+    ``planned=`` (#38) when given."""
+    return redirect(_edit_url(pk, filters, occurrence, planned))
 
 
 def _save_chore(request, form, chore=None, filters=None, scope=None, calendar=None):
@@ -554,6 +563,9 @@ def _save_chore(request, form, chore=None, filters=None, scope=None, calendar=No
     saved "this and future" from ``scope["scope_day"]``. An edit that leaves
     the chore ``once`` keeps its row or projected date in sync (#35), with
     ``today`` read once: ``scope["scope_today"]``, else the viewer's date.
+    From a Planned date (#38) a refused edit (``FutureEditRefused``, also a
+    switch to once) is a non-field error with status 200, and a saved one
+    returns to the page with ``planned=``.
     """
     creating = chore is None
     old = None
@@ -570,6 +582,8 @@ def _save_chore(request, form, chore=None, filters=None, scope=None, calendar=No
             chore = form.save(commit=False)
             if creating:
                 chore.template_source = form.cleaned_data["template"]
+            if scope is not None and scope.get("scope_planned") and chore.recurrence == Chore.Recurrence.ONCE:
+                raise FutureEditRefused(FutureEditRefused.SCHEDULE)  # a schedule change too
             if scope is not None and chore.recurrence != Chore.Recurrence.ONCE:
                 apply_future_edit(chore, old, scope["scope_day"], scope["scope_today"])
             elif not creating and chore.recurrence == Chore.Recurrence.ONCE:
@@ -586,12 +600,17 @@ def _save_chore(request, form, chore=None, filters=None, scope=None, calendar=No
         form.add_error("start_date", str(refused))
         chore = Chore.objects.get(pk=chore.pk)
         return _chore_form_page(request, form, chore, filters=filters, scope=scope)
+    except FutureEditRefused as refused:  # everything above is rolled back (#38)
+        form.add_error(None, str(refused))
+        chore = Chore.objects.get(pk=chore.pk)
+        return _chore_form_page(request, form, chore, filters=filters, scope=scope)
     messages.success(request, "Chore saved and template added" if add_template else "Chore saved")
     if creating and filters is not None:  # opened with return_to=dashboard (#19)
         return _dashboard_redirect(request.POST)
     if creating and calendar is not None:  # opened with return_to=calendar (#36)
         return redirect(_calendar_url(calendar))
-    return _edit_redirect(chore.pk, filters)
+    planned = scope.get("scope_planned") if scope is not None else None
+    return _edit_redirect(chore.pk, filters, planned=planned["date"] if planned else None)
 
 
 def _edit_occurrence(chore, data):
@@ -605,12 +624,32 @@ def _edit_occurrence(chore, data):
     return get_object_or_404(ChoreOccurrence, pk=pk, chore=chore, is_cancelled=False)
 
 
-def _scope_context(occurrence, today):
-    """Template values for a recurring chore's edit page (#20)."""
-    context = {"scope_day": occurrence.date if occurrence else today, "scope_today": today,
-               "scope_occurrence": occurrence}
+def _edit_planned(chore, data, today):
+    """The projected dict of the ``planned=`` date of ``chore`` (#38), None
+    when absent; 404 for anything that is not a projected date after this
+    Sunday for ``today`` (unparseable, empty, this week, off the rule,
+    cancelled)."""
+    if "planned" not in data:
+        return None
+    day = month.parse_date(data.get("planned"))
+    if day is None or day <= dash.monday_of(today) + datetime.timedelta(days=6):
+        raise Http404("Not a planned date of this chore")
+    projected = projected_occurrence(chore, day, today)
+    if projected is None:
+        raise Http404("Not a planned date of this chore")
+    return projected
+
+
+def _scope_context(occurrence, today, planned=None):
+    """Template values for a recurring chore's edit page (#20), cut off at a
+    stored row, a Planned date (#38) or today."""
+    day = occurrence.date if occurrence else planned["date"] if planned else today
+    context = {"scope_day": day, "scope_today": today, "scope_occurrence": occurrence,
+               "scope_planned": planned}
     if occurrence is not None and occurrence.status == ChoreOccurrence.Status.TODO:
         context["occurrence_form"] = OccurrenceForm.for_row(occurrence)
+    elif planned is not None:
+        context["occurrence_form"] = OccurrenceForm.for_planned(planned)
     return context
 
 
@@ -662,6 +701,22 @@ def _save_occurrence(request, chore, occurrence, filters, scope):
     return _edit_redirect(chore.pk, filters, occurrence)
 
 
+def _save_planned(request, chore, filters, scope):
+    """"This occurrence only" on a Planned date (#38): its title,
+    instructions, due time and points. A posted ``date`` is ignored."""
+    planned = scope["scope_planned"]
+    form = OccurrenceForm.for_planned(planned, request.POST)
+    if not form.is_valid():
+        scope["occurrence_form"] = form
+        return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters, scope=scope)
+    data = form.cleaned_data
+    if not edit_projected_date(chore, planned["date"], data["title"], data["instructions"],
+                               data["due_time"], data["points"], scope["scope_today"]):
+        raise Http404("Not a planned date of this chore")  # lost a race
+    messages.success(request, "Occurrence saved")
+    return _edit_redirect(chore.pk, filters, planned=planned["date"])
+
+
 @require_http_methods(["GET", "POST"])
 def chore_create(request):
     # return_to=dashboard (exactly) keeps the dashboard view: GET reads the query,
@@ -705,16 +760,22 @@ def chore_edit(request, pk):
         if request.method == "POST":
             return _save_chore(request, ChoreForm(request.POST, instance=chore), chore, filters)
         return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters)
-    # Recurring: cutoff D is the occurrence's date, else today in the viewer's zone.
+    # Recurring: cutoff D is the occurrence's date or the Planned date (#38),
+    # else today in the viewer's zone.
+    if "occurrence" in data and "planned" in data:
+        return HttpResponseBadRequest("Give an occurrence or a planned date, not both")
     occurrence = _edit_occurrence(chore, data)
     today = timezone.localdate()
-    scope = _scope_context(occurrence, today)
+    planned = _edit_planned(chore, data, today)
+    scope = _scope_context(occurrence, today, planned)
     if request.method == "GET":
         return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters, scope=scope)
     choice = request.POST.get("scope", "future")
     if choice not in ("this", "future"):
         return HttpResponseBadRequest("scope must be 'this' or 'future'")
     if choice == "this":
+        if planned is not None:
+            return _save_planned(request, chore, filters, scope)
         return _save_occurrence(request, chore, occurrence, filters, scope)
     return _save_chore(request, ChoreForm(request.POST, instance=chore), chore, filters, scope)
 

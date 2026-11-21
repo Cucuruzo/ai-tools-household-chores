@@ -94,7 +94,7 @@ def test_card_link_drops_invalid_values(client, data):
 def test_projected_card_has_the_link(client):
     c = weekly("Trash", weekday=3)
     body = page(client, week="2026-W48", data={"day": "4"})
-    assert link_of(body) == f"/chores/{c.pk}/edit/?week=2026-W48&day=4"
+    assert link_of(body) == f"/chores/{c.pk}/edit/?week=2026-W48&day=4&planned=2026-11-26"
 
 
 @pytest.mark.django_db

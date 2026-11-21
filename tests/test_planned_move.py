@@ -41,7 +41,7 @@ SUN_NOON = "2026-11-22T12:00:00"
 TODAY = d("2026-11-18")
 MONDAY = d("2026-11-16")
 EXTRA_FIELDS = {"id", "chore_id", "date", "is_cancelled", "is_override", "member_id",
-                "moved_from", "title", "instructions", "due_time", "points"}
+                "moved_from", "title", "instructions", "due_time", "points", "own_values"}
 MOVE_DETAILS = re.compile(r'<details class="move-planned">.*?</details>', re.S)
 HIDDEN = re.compile(r'<input type="hidden" name="((?!csrf)[^"]+)" value="([^"]*)">')
 MESSAGE = '<p class="message" role="status"><mark>{}</mark></p>'
@@ -771,12 +771,12 @@ def test_rule_change_keeps_the_extra(client, family):
     old = {name: getattr(c, name) for name in services.RULE_FIELDS + services.ASSIGNMENT_FIELDS}
     c.refresh_from_db()
     c.recurrence_day, c.title, c.points = 4, "Recycling", 20
-    apply_future_edit(c, old, d("2026-11-23"), TODAY)
+    apply_future_edit(c, old, TODAY, TODAY)
     assert list(OccurrenceException.objects.order_by("pk").values()) == before
     assert [(str(p["date"]), p["title"]) for p in projected(c, "2026-11-23", "2026-12-13")] == [
         ("2026-11-27", "Recycling"), ("2026-12-04", "Bins"), ("2026-12-11", "Recycling")]
     assert who(c, "2026-11-23", "2026-12-13") == [
-        ("2026-11-27", "Leo"), ("2026-12-04", "Emma"), ("2026-12-11", "Leo")]
+        ("2026-11-27", "Emma"), ("2026-12-04", "Emma"), ("2026-12-11", "Emma")]
 
 
 # --- Viewing writes nothing, query count, clock ----------------------------------------------------

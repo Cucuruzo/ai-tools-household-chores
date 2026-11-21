@@ -266,6 +266,18 @@ class OccurrenceForm(forms.Form):
             "date": occurrence.date,
         })
 
+    @classmethod
+    def for_planned(cls, projected, data=None):
+        """The form for one projected date (#38), filled from its projected
+        dict. It has no Date field (a Planned date moves on its card, #48),
+        so a posted ``date`` is ignored."""
+        form = cls(data, initial={
+            "title": projected["title"], "instructions": projected["instructions"],
+            "due_time": projected["due_time"], "points": projected["points"],
+        })
+        del form.fields["date"]
+        return form
+
 
 class TemplateForm(ChoreForm):
     """Edits a household template: no start date, picker field or save-as-template."""
