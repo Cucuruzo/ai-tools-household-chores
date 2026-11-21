@@ -27,7 +27,9 @@ ai-tools-household-chores/
     asgi.py
   chores/                          # main Django app
     models.py
-    services.py                    # rotation, occurrence projection, streaks
+    services.py                    # rotation, occurrence projection
+    progress.py                    # streaks and badges, computed on read
+    progress_views.py              # /progress/ view
     forms.py
     views.py
     urls.py
@@ -44,6 +46,7 @@ ai-tools-household-chores/
         family.html                # family management screen
         contribution.html          # contribution / progress view
         history.html               # history view
+        progress.html              # streaks and badges
         _chore_card.html           # partial — single chore row on dashboard
         _dashboard_list.html       # partial — chore list (overdue/today/upcoming)
         _calendar_grid.html        # partial — month grid
@@ -132,14 +135,17 @@ Built-in and custom household chore templates, stored as `Chore` records with
 `is_template=True`. No separate model needed — templates are just chores that
 are never scheduled directly.
 
-### Badge
+### Badges
 
-| Field       | Type                           |
-|-------------|--------------------------------|
-| id          | AutoField (PK)                 |
-| member      | ForeignKey(Member)             |
-| badge_type  | CharField (e.g. `streak_7`, `hero`, `completed_50`) |
-| awarded_at  | DateTimeField (auto_now_add)   |
+Badges are computed on read in `chores/progress.py`; there is no model and no
+migration. The three rules:
+
+- `streak_7` ("7 in a Row"): the credited member of a `done` row that brings a
+  chore's running count to 7 or more.
+- `hero` ("Chore Hero"): 10 or more `done` rows credited to the member whose
+  `done_at` local date falls in the same Mon-Sun week (any week).
+- `completed_50` ("50 Chores Completed"): 50 or more `done` rows credited to
+  the member in total.
 
 ## Rotation Logic
 
@@ -196,6 +202,7 @@ are never scheduled directly.
 
 /profile/<id>/                     POST   switch active member
 
+/progress/                         GET    streaks and badges
 /contribution/                     GET    contribution / progress view
 /contribution/?period=week         GET    this week's contribution
 /contribution/?period=month        GET    this month's contribution
@@ -273,14 +280,27 @@ a "+" link opens chore creation with that date pre-filled (`?date=YYYY-MM-DD`).
 - Contribution view aggregates by member for current week / month. It groups by `completed_by` (who was credited, not the assignee) and counts a done row by the local date of `done_at` in the viewer's zone.
 
 ### Streaks
-- Per-chore streak: consecutive scheduled occurrences completed (not skipped).
-- Skipping breaks the streak.
-- Calculated on read from `ChoreOccurrence` history.
+- Counted per chore, in that chore's own occurrences (days, weeks or months),
+  never per member and never across chores.
+- Uses the occurrence `date`, not `done_at`. Only counted rows are used: not
+  cancelled, not a template's.
+- Newest first: `done` rows count; the first `skipped` row, or the first
+  `todo` row dated before today, stops the count. A `todo` dated today or
+  later is passed over (it can still be done), and so are dates with no row
+  (an unopened week, a cancelled date). Who did it does not matter.
+- "Today" is the viewer's local date (`tz` cookie), read once in the view and
+  passed in; `chores/progress.py` never reads the clock.
+- Calculated on read from `ChoreOccurrence` history; nothing is cached, so an
+  undo changes the streak on the next read.
 
 ### Badges
-- Awarded automatically when thresholds are met.
-- Examples: `7-Day Streak`, `Chore Hero`, `50 Chores Completed`.
-- Stored in `Badge` model so they persist even if the streak breaks.
+- Computed on read, never stored (see the Badges rules in the data model).
+- A broken streak keeps its `streak_7` badge, because the earlier run is still
+  in the history.
+- An undo removes a badge only when it undoes the row that made the milestone;
+  doing it again brings the badge back.
+- A deleted member's rows lose their credit (SET_NULL), so the badges go with
+  the member; nobody else gains one.
 
 ## Design Decisions
 

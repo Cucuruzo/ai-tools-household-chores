@@ -1,10 +1,11 @@
 from django.urls import path
 
-from . import contribution_views, history_views, template_views, views
+from . import contribution_views, history_views, progress_views, template_views, views
 
 urlpatterns = [
     path('', views.home, name='home'),
     path('dashboard/', views.dashboard, name='dashboard'),
+    path('progress/', progress_views.progress, name='progress'),
     path('calendar/', views.calendar, name='calendar'),
     path('family/', views.family, name='family'),
     path('family/add/', views.member_add, name='member_add'),
