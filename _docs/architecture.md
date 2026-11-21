@@ -48,6 +48,7 @@ ai-tools-household-chores/
         _dashboard_list.html       # partial — chore list (overdue/today/upcoming)
         _calendar_grid.html        # partial — month grid
         _member_row.html           # partial — single member in family list
+        _contribution.html         # partial — the contribution section
         _template_picker.html      # partial — chore template chooser
     static/
       chores/
@@ -258,6 +259,7 @@ a "+" link opens chore creation with that date pre-filled (`?date=YYYY-MM-DD`).
 | Navigate month          | Click < or >     | `hx-get`               | `_calendar_grid.html`  |
 | Add/edit/remove member  | Submit form      | `hx-post`              | `_member_row.html`     |
 | Pick template           | Click template   | `hx-get`               | pre-fills chore form   |
+| Switch contribution period | Click link    | `hx-get`               | `_contribution.html`   |
 
 ## Points and Streaks
 
@@ -266,7 +268,7 @@ a "+" link opens chore creation with that date pre-filled (`?date=YYYY-MM-DD`).
 - Points awarded on completion, removed on undo.
 - Skipped chores give no points.
 - Late completion gives full points.
-- Contribution view aggregates by member for current week / month.
+- Contribution view aggregates by member for current week / month. It groups by `completed_by` (who was credited, not the assignee) and counts a done row by the local date of `done_at` in the viewer's zone.
 
 ### Streaks
 - Per-chore streak: consecutive scheduled occurrences completed (not skipped).

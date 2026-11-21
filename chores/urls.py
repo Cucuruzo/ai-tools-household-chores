@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import template_views, views
+from . import contribution_views, template_views, views
 
 urlpatterns = [
     path('', views.home, name='home'),
@@ -18,5 +18,6 @@ urlpatterns = [
     path('chores/templates/', template_views.template_list, name='template_list'),
     path('chores/templates/<int:pk>/edit/', template_views.template_edit, name='template_edit'),
     path('chores/templates/<int:pk>/delete/', template_views.template_delete, name='template_delete'),
+    path('contribution/', contribution_views.contribution, name='contribution'),
     path('profile/<int:pk>/', views.profile_switch, name='profile_switch'),
 ]
