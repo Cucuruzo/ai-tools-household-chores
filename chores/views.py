@@ -567,3 +567,60 @@ def occurrence_toggle(request, pk):
         if current.status != target:
             return HttpResponseBadRequest("Undo first")
     return _toggle_success(request, pk)
+
+
+# --- Assign / reassign (#13) -------------------------------------------------------
+
+
+def _assign_response(request, pk):
+    """The swapped card, the re-rendered list when a member filter now hides
+    it, or (no JavaScript) the 302 back to the same view."""
+    if not _is_htmx(request):
+        return _dashboard_redirect(request.POST)
+    now = timezone.localtime()  # one clock read, viewer's zone (#26)
+    today = timezone.localdate(now)
+    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache())
+    if not cards:  # removed after the write
+        raise Http404("No such occurrence")
+    [card] = cards
+    card.overdue = dash.is_overdue(card, today, now)
+    monday, member, day = _dashboard_filters(request.POST)
+    monday = monday or dash.monday_of(today)
+    if member is None or dash.filter_cards([card], monday, member, None):
+        return render(request, "chores/_chore_card.html", {"card": card, "card_only": True})
+    context = _dashboard_context(monday, today, now, member, day)
+    context.update(_filter_context(context["nav"], member, day))
+    response = render(request, "chores/_dashboard_list.html", context)
+    response["HX-Retarget"] = "#dashboard-list"
+    response["HX-Reswap"] = "outerHTML"
+    return response
+
+
+@require_POST
+def occurrence_assign(request, pk):
+    if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
+        raise Http404("No such occurrence")
+    occurrence = get_object_or_404(_shown_occurrences(), pk=pk)
+    raw = request.POST.get("assignee")
+    if raw is None:
+        return HttpResponseBadRequest("Choose who to assign")
+    if raw == "":
+        member_id = None
+    else:
+        member_id = _parse_pk(raw)
+        if member_id is None or not Member.objects.filter(pk=member_id).exists():
+            return HttpResponseBadRequest("Unknown member")
+    if occurrence.status != ChoreOccurrence.Status.TODO:
+        return HttpResponseBadRequest("Undo first")
+    if occurrence.member_id != member_id:
+        updated = _shown_occurrences().filter(
+            pk=pk, status=ChoreOccurrence.Status.TODO
+        ).update(member_id=member_id, is_override=True)
+        if not updated:
+            # Lost a race: the row was cancelled or marked done after it was read.
+            current = _shown_occurrences().filter(pk=pk).first()
+            if current is None:
+                raise Http404("No such occurrence")
+            if current.status != ChoreOccurrence.Status.TODO:
+                return HttpResponseBadRequest("Undo first")
+    return _assign_response(request, pk)

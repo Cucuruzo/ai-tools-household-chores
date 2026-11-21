@@ -12,6 +12,7 @@ urlpatterns = [
     path('family/<int:pk>/move/', views.member_move, name='member_move'),
     path('family/<int:pk>/delete/', views.member_delete, name='member_delete'),
     path('dashboard/toggle/<int:pk>/', views.occurrence_toggle, name='occurrence_toggle'),
+    path('dashboard/assign/<int:pk>/', views.occurrence_assign, name='occurrence_assign'),
     path('chores/create/', views.chore_create, name='chore_create'),
     path('chores/<int:pk>/edit/', views.chore_edit, name='chore_edit'),
     path('chores/<int:pk>/delete/', views.chore_delete, name='chore_delete'),

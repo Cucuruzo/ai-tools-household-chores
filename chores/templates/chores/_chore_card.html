@@ -6,8 +6,10 @@
   Then the Done/Skip/Undo form (#12), outside the <article>. A stored card's
   whole block is wrapped in <div class="card-block" id="card-<pk>">, which
   the status form swaps (hx-target), so Delete and the buttons update together.
+  With card_only (set only by #13) just the <article> is rendered, so an
+  assign swap leaves the block's Delete, status and assign forms in place.
 {% endcomment %}
-{% if card.pk %}<div class="card-block" id="card-{{ card.pk }}">
+{% if card.pk and not card_only %}<div class="card-block" id="card-{{ card.pk }}">
 {% endif %}<article class="chore-card"{% if card.pk %} id="occurrence-{{ card.pk }}"{% endif %}>
   <p class="title">
     <strong><a href="{% url 'chore_edit' card.chore_id %}">{% if card.struck %}<s>{{ card.title }}</s>{% else %}{{ card.title }}{% endif %}</a></strong>
@@ -24,7 +26,7 @@
   </p>
   {% if card.status == "done" %}<p class="credit">{% if card.completed_by %}Done by <span class="avatar">{{ card.completed_by.avatar }}</span> <span class="name">{{ card.completed_by.name }}</span>{% else %}Done · not credited{% endif %}</p>{% endif %}
 </article>
-{% if card.pk %}
+{% if card.pk and not card_only %}
 <details class="delete-confirm">
   <summary role="button" class="outline contrast">Delete</summary>
   <form method="post" action="{% url 'chore_delete' card.chore_id %}">
@@ -55,5 +57,21 @@
     <button type="submit" name="action" value="undo" class="secondary">Undo</button>
   {% endif %}
 </form>
+{% if card.status == "todo" %}
+<form class="assign" method="post" action="{% url 'occurrence_assign' card.pk %}" hx-post="{% url 'occurrence_assign' card.pk %}" hx-trigger="change" hx-target="#occurrence-{{ card.pk }}" hx-swap="outerHTML">
+  {% csrf_token %}
+  {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+  {% if filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+  {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+  <label for="assign-{{ card.pk }}">Assigned to</label>
+  <select id="assign-{{ card.pk }}" name="assignee">
+    <option value=""{% if not card.member %} selected{% endif %}>Unassigned</option>
+    {% for m in members %}
+      <option value="{{ m.pk }}"{% if card.member.pk == m.pk %} selected{% endif %}>{{ m.avatar }} {{ m.name }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit">Assign</button></noscript>
+</form>
+{% endif %}
 </div>
 {% endif %}

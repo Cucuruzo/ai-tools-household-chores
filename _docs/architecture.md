@@ -254,7 +254,7 @@ a "+" link opens chore creation with that date pre-filled (`?date=YYYY-MM-DD`).
 | Undo completion         | Click undo       | `hx-post`              | `#card-<pk>` (the `card-block` wrapper in `_chore_card.html`) |
 | Navigate week           | Click < or >     | `hx-get`               | `_dashboard_list.html` |
 | Filter by member/day    | Change dropdown  | `hx-get`               | `_dashboard_list.html` |
-| Assign/reassign         | Submit dropdown  | `hx-post`              | `_chore_card.html`     |
+| Assign/reassign         | Change dropdown  | `hx-post` (field `assignee`) | `#occurrence-<pk>` (`_chore_card.html` with `card_only`); on a member-filter mismatch `HX-Retarget: #dashboard-list` + `_dashboard_list.html` |
 | Navigate month          | Click < or >     | `hx-get`               | `_calendar_grid.html`  |
 | Add/edit/remove member  | Submit form      | `hx-post`              | `_member_row.html`     |
 | Pick template           | Click template   | `hx-get`               | pre-fills chore form   |
