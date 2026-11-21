@@ -1,6 +1,6 @@
 {% extends "chores/base.html" %}
 
-{% block title %}{% if chore %}Edit chore{% else %}New chore{% endif %} · Household Chores{% endblock %}
+{% block title %}{% if editing_template %}Edit template{% elif chore %}Edit chore{% else %}New chore{% endif %} · Household Chores{% endblock %}
 
 {% block head %}
 <style>
@@ -15,19 +15,19 @@
 
 {% block content %}
 <section id="chore">
-  <h1>{% if chore %}Edit chore{% else %}New chore{% endif %}</h1>
+  <h1>{% if editing_template %}Edit template{% elif chore %}Edit chore{% else %}New chore{% endif %}</h1>
 
   {% for message in messages %}
     <p class="message" role="status"><mark>{{ message }}</mark></p>
   {% endfor %}
 
-  {% if not chore %}{% include "chores/_template_picker.html" %}{% endif %}
+  {% if not chore and not editing_template %}{% include "chores/_template_picker.html" %}{% endif %}
 
   <div id="chore-form-area">
   <form id="chore-form" method="post"
-        action="{% if chore %}{% url 'chore_edit' chore.pk %}{% else %}{% url 'chore_create' %}{% endif %}">
+        action="{% if editing_template %}{% url 'template_edit' editing_template.pk %}{% elif chore %}{% url 'chore_edit' chore.pk %}{% else %}{% url 'chore_create' %}{% endif %}">
     {% csrf_token %}
-    {% if not chore %}{{ form.template }}{% endif %}
+    {% if not chore and not editing_template %}{{ form.template }}{% endif %}
     {{ form.non_field_errors }}
 
     <label for="{{ form.title.id_for_label }}">Title</label>
@@ -37,10 +37,12 @@
     {{ form.instructions }} {{ form.instructions.errors }}
 
     <div class="grid">
+      {% if not editing_template %}
       <div>
         <label for="{{ form.start_date.id_for_label }}">Start date</label>
         {{ form.start_date }} {{ form.start_date.errors }}
       </div>
+      {% endif %}
       <div>
         <label for="{{ form.due_time.id_for_label }}">Due time</label>
         {{ form.due_time }} {{ form.due_time.errors }}
@@ -86,12 +88,14 @@
     <label for="{{ form.points.id_for_label }}">Points</label>
     {{ form.points }} {{ form.points.errors }}
 
+    {% if not editing_template %}
     <label for="{{ form.save_as_template.id_for_label }}">
       {{ form.save_as_template }} {{ form.save_as_template.label }}
     </label>
     {{ form.save_as_template.errors }}
+    {% endif %}
 
-    <button type="submit">Save chore</button>
+    <button type="submit">{% if editing_template %}Save template{% else %}Save chore{% endif %}</button>
   </form>
 
 <script>
