@@ -15,6 +15,7 @@
 
 {% block content %}
 <section id="chore">
+  {% if back_url %}<p><a id="back-to-dashboard" href="{{ back_url }}">Back to dashboard</a></p>{% endif %}
   <h1>{% if editing_template %}Edit template{% elif chore %}Edit chore{% else %}New chore{% endif %}</h1>
 
   {% for message in messages %}
@@ -27,6 +28,9 @@
   <form id="chore-form" method="post"
         action="{% if editing_template %}{% url 'template_edit' editing_template.pk %}{% elif chore %}{% url 'chore_edit' chore.pk %}{% else %}{% url 'chore_create' %}{% endif %}">
     {% csrf_token %}
+    {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+    {% if back_url and filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+    {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
     {% if not chore and not editing_template %}{{ form.template }}{% endif %}
     {{ form.non_field_errors }}
 
@@ -135,6 +139,9 @@
     <summary role="button" class="outline contrast">Delete</summary>
     <form method="post" action="{% url 'chore_delete' chore.pk %}">
       {% csrf_token %}
+      {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
+      {% if back_url and filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
+      {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
       {% if chore.recurrence == "once" %}
         <p>Delete this chore?</p>
         <button type="submit" name="scope" value="future" class="contrast">Delete</button>

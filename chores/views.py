@@ -130,6 +130,7 @@ def _filter_context(nav, member, day):
         "next_url": url(nav["next"]) if nav["next"] else None,
         "this_week_url": url(None),
         "switcher_next": url(own_week),
+        "return_query": dash.dashboard_query(own_week, member, day),
     }
 
 
@@ -398,8 +399,17 @@ def profile_switch(request, pk):
     return redirect(target)
 
 
-def _chore_form_page(request, form, chore=None, start_date=None):
+def _chore_form_page(request, form, chore=None, start_date=None, filters=None):
     context = {"form": form, "chore": chore, "prefill_date": start_date}
+    if filters is not None:  # normalized (monday, member, day) from the dashboard (#27)
+        monday, member, day = filters
+        week = dash.week_param(monday) if monday else None
+        context.update(
+            filter_week=week,
+            filter_member="" if member is None else member,
+            filter_day=day,
+            back_url=reverse("dashboard") + dash.dashboard_query(week, member, day),
+        )
     if chore is None:  # the picker is only offered when creating
         templates = Chore.objects.filter(is_template=True).order_by(Lower("title"), "id")
         builtin = [t for t in templates if t.is_builtin]
@@ -410,10 +420,10 @@ def _chore_form_page(request, form, chore=None, start_date=None):
     return render(request, "chores/chore_form.html", context)
 
 
-def _save_chore(request, form, chore=None):
+def _save_chore(request, form, chore=None, filters=None):
     """Validate a bound ChoreForm and save; returns a response."""
     if not form.is_valid():
-        return _chore_form_page(request, form, chore)
+        return _chore_form_page(request, form, chore, filters=filters)
     creating = chore is None
     with transaction.atomic():
         chore = form.save(commit=False)
@@ -424,7 +434,11 @@ def _save_chore(request, form, chore=None):
         if add_template:
             form.save_household_template(chore)
     messages.success(request, "Chore saved and template added" if add_template else "Chore saved")
-    return redirect("chore_edit", pk=chore.pk)
+    if filters is None:
+        return redirect("chore_edit", pk=chore.pk)
+    monday, member, day = filters
+    week = dash.week_param(monday) if monday else None
+    return redirect(reverse("chore_edit", args=[chore.pk]) + dash.dashboard_query(week, member, day))
 
 
 @require_http_methods(["GET", "POST"])
@@ -449,9 +463,11 @@ def chore_edit(request, pk):
         raise Http404("No such chore")
     # Templates (is_template=True) are not editable here; that is #23.
     chore = get_object_or_404(Chore, pk=pk, is_template=False)
+    # The dashboard view to return to: the form posts it back as hidden inputs.
+    filters = _dashboard_filters(request.POST if request.method == "POST" else request.GET)
     if request.method == "POST":
-        return _save_chore(request, ChoreForm(request.POST, instance=chore), chore)
-    return _chore_form_page(request, ChoreForm(instance=chore), chore)
+        return _save_chore(request, ChoreForm(request.POST, instance=chore), chore, filters)
+    return _chore_form_page(request, ChoreForm(instance=chore), chore, filters=filters)
 
 
 # --- Delete (#5) -----------------------------------------------------------------
