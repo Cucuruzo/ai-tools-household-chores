@@ -742,3 +742,67 @@ def test_week_became_current_in_between(client, family):
     assert len(week(dishes)) == 7 and week(dishes) == week(control)
     assert (RotationState.objects.get(chore=dishes).last_member_id
             == RotationState.objects.get(chore=control).last_member_id)
+
+
+# --- #43 ---
+
+from tests.test_dashboard import WED  # noqa: E402
+
+WED_5 = "2026-11-18T12:05:00"
+
+
+def trash43(start="2026-11-04", **kwargs):
+    return chore("Trash", start_date=start, recurrence="weekly", recurrence_day=2, **kwargs)
+
+
+def test_43_a_undo_restores_the_chore_deleted_by_this_only(client):
+    c = trash43()
+    old = ChoreOccurrence.objects.create(chore=c, date=d("2026-11-11"), points=c.points)
+    wed = ChoreOccurrence.objects.create(chore=c, date=d("2026-11-18"), points=c.points)
+    follow(client, delete(client, c, WED, occurrence=wed.pk, scope="future"), WED)
+    assert slot(client)["kind"] == "trim"
+    before = state()
+    token = deleted(client, c, WED, occurrence=old.pk, scope="this")
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    s = slot(client)
+    assert s["kind"] == "chore" and s["chore"]["end_date"] == "2026-11-17"
+    assert [(o["id"], o["is_cancelled"]) for o in s["occurrences"]] == [(old.pk, False)]
+    body = follow(client, undone(client, token, WED_5), WED_5)
+    assert state() == before
+    assert "Chore restored" in body
+    assert [(key, x["id"]) for key, x in card(body, "Trash")] == [("overdue", old.pk)]
+
+
+def test_43_b_undo_puts_back_a_planned_only_chore_without_an_exception(client):
+    c = trash43(start="2026-11-25")
+    follow(client, delete(client, c, WED, date="2026-12-02", scope="future", week="2026-W49"), WED)
+    assert Chore.objects.get(pk=c.pk).end_date == d("2026-12-01")
+    before = state()
+    token = deleted(client, c, WED, date="2026-11-25", scope="this", week="2026-W48")
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    s = slot(client)
+    assert s["kind"] == "chore" and s["exceptions"] == []
+    follow(client, undone(client, token, WED_5, week="2026-W48"), WED_5)
+    assert state() == before
+    assert not OccurrenceException.objects.filter(chore_id=c.pk).exists()
+    assert members_of("2026-11-23", "2026-11-29", "2026-11-18", c) == [("2026-11-25", None, False)]
+
+
+def test_43_e_undo_restores_the_state_before_the_second_this_only(client):
+    a = member("A", order=0)
+    c = trash43(start="2026-11-25", end_date=d("2026-12-08"))
+    override = OccurrenceException.objects.create(chore=c, date=d("2026-12-02"), is_override=True, member=a)
+    follow(client, delete(client, c, WED, date="2026-11-25", scope="this", week="2026-W48"), WED)
+    assert slot(client)["kind"] == "planned"
+    before = state()
+    token = deleted(client, c, WED, date="2026-12-02", scope="this", week="2026-W49")
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    assert slot(client)["kind"] == "chore"
+    follow(client, undone(client, token, WED_5, week="2026-W49"), WED_5)
+    assert state() == before
+    restored = {str(e.date): e for e in OccurrenceException.objects.filter(chore_id=c.pk)}
+    assert restored["2026-11-25"].is_cancelled is True
+    assert restored["2026-12-02"].pk == override.pk
+    assert (restored["2026-12-02"].is_override, restored["2026-12-02"].member_id,
+            restored["2026-12-02"].is_cancelled) == (True, a.pk, False)
+    assert members_of("2026-11-30", "2026-12-06", "2026-11-18", c) == [("2026-12-02", a.pk, True)]
