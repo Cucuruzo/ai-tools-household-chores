@@ -8,6 +8,7 @@ def profile(request):
     return {
         "members": list(Member.objects.all()),
         "active_member": get_active_member(request),
+        "switcher_next": request.path,
     }
 
 
