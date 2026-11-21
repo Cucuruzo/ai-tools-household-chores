@@ -4,6 +4,8 @@ from django.db.models import Q
 from django.db.models.functions import Lower
 from django.http import Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.cache import patch_vary_headers
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -132,7 +134,11 @@ def _render_family(request, add_form=None):
     return render(
         request,
         "chores/family.html",
-        {"members": members, "add_form": add_form or _member_form()},
+        {
+            "members": members,
+            "add_form": add_form or _member_form(),
+            "switcher_next": reverse("family"),
+        },
     )
 
 
@@ -161,6 +167,9 @@ def member_edit(request, pk):
     member = get_object_or_404(Member, pk=pk)
     form = _member_form(member, request.POST)
     editing = not form.is_valid()
+    if not editing and not _is_htmx(request):
+        form.save()
+        return redirect("family")
     if not editing:
         member = form.save()
         form = _member_form(member)
@@ -172,7 +181,15 @@ def member_edit(request, pk):
         "is_first": not others.filter(order__lt=member.order).exists(),
         "is_last": not others.filter(order__gt=member.order).exists(),
     }
-    return render(request, "chores/_member_row.html", context)
+    response = render(request, "chores/_member_row.html", context)
+    if not editing:
+        # Out-of-band swap so the header switcher shows the new name/avatar.
+        response.content += render_to_string(
+            "chores/_profile_switcher.html",
+            {"switcher_oob": True, "switcher_next": reverse("family")},
+            request,
+        ).encode()
+    return response
 
 
 @require_POST
