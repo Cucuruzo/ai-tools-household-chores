@@ -310,7 +310,10 @@ def test_page_for_a_finished_row(client, status):
     o = row(c, nov(17), status)
     text = body(client, c, f"?occurrence={o.pk}")
     section = SECTION.search(text).group(1).strip()
-    assert section == f"<p>This occurrence is {status}. Undo it on the dashboard to change it on its own.</p>"
+    assert section == (
+        '<p id="occurrence-title"><strong>Dishes</strong></p>\n    \n    '
+        f"<p>This occurrence is {status}. Undo it on the dashboard to change it on its own.</p>"
+    )
     assert 'id="occurrence-form"' not in text
     assert '<time datetime="2026-11-17">Tue 17 Nov</time>' in NOTE.search(text).group(1)
     assert FUTURE_BUTTON in text

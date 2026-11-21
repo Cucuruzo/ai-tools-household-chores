@@ -57,6 +57,8 @@
       <button type="submit" name="scope" value="this">Save this occurrence</button>
     </form>
     {% else %}
+    <p id="occurrence-title"><strong>{{ scope_occurrence.title }}</strong></p>
+    {% if scope_occurrence.instructions %}<p id="occurrence-instructions" class="instructions">{{ scope_occurrence.instructions|linebreaksbr }}</p>{% endif %}
     <p>This occurrence is {% if scope_occurrence.status == "done" %}done{% else %}skipped{% endif %}. Undo it on the dashboard to change it on its own.</p>
     {% endif %}
   </section>
