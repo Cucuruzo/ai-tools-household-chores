@@ -1,0 +1,33 @@
+{% extends "chores/base.html" %}
+
+{% block title %}Calendar · Household Chores{% endblock %}
+
+{% block head %}
+<style>
+  #calendar-grid .month-nav h1 { margin: 0; font-size: 1.25rem; }
+  #calendar-grid .month-nav a { text-decoration: none; font-size: 1.5rem; }
+  #calendar-grid table { table-layout: fixed; width: 100%; }
+  #calendar-grid th, #calendar-grid td { padding: 0.25rem; text-align: center; vertical-align: top; }
+  #calendar-grid td { height: 5rem; }
+  #calendar-grid td.filler { color: var(--pico-muted-color); background: var(--pico-card-sectioning-background-color); }
+  #calendar-grid td.today { border: 3px solid var(--pico-primary); }
+  #calendar-grid .day-number { display: block; }
+  #calendar-grid .add-chore { display: block; text-decoration: none; font-size: 0.8rem; }
+  #calendar-grid .count { display: block; font-weight: bold; font-size: 0.85rem; }
+  .dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; margin: 0 1px; }
+  .dot-todo { background: var(--pico-primary); }
+  .dot-overdue { background: var(--pico-del-color); }
+  .dot-done { background: var(--pico-ins-color); }
+  .dot-skipped { background: var(--pico-muted-color); }
+  .dot-planned { background: transparent; border: 2px solid var(--pico-primary); }
+  @media (max-width: 575px) {
+    #calendar-grid .dots { display: none; }
+    #calendar-grid th, #calendar-grid td { padding: 0.1rem; font-size: 0.8rem; }
+    #calendar-grid td { height: 3.5rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "chores/_calendar_grid.html" %}
+{% endblock %}

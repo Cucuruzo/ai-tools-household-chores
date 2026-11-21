@@ -240,8 +240,11 @@ are never scheduled directly.
 +-------------------------------------------------------+
 ```
 
-Each date cell shows chore count / icons. Clicking a date opens chore creation
-with that date pre-filled.
+Each in-month date cell shows the chore count and up to 3 status dots ("+N" for
+the rest). Only months from 12 months before to 12 months after the current month
+can be shown; any other `?month=` falls back to the current month. The day number
+links to the dashboard week filtered to that day (`/dashboard/?week=…&day=…`), and
+a "+" link opens chore creation with that date pre-filled (`?date=YYYY-MM-DD`).
 
 ## HTMX Interaction Patterns
 

@@ -14,6 +14,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from . import dashboard as dash
+from . import month
 from .forms import ChoreForm, MemberForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
@@ -170,6 +171,82 @@ def dashboard(request):
     return response
 
 
+# --- Monthly calendar (#14) ----------------------------------------------------
+
+
+def _month_entries(nav, today):
+    """``{date: [(status, due_time, title, chore_id)]}`` for the month shown."""
+    entries = {}
+    stored = _shown_occurrences().filter(date__gte=nav["first"], date__lte=nav["last"])
+    for status, day, due_time, title, chore_id in stored.values_list(
+        "status", "date", "due_time", "chore__title", "chore_id"
+    ):
+        entries.setdefault(day, []).append(
+            (month.dot_status(status, day, today), due_time, title, chore_id)
+        )
+    if not nav["is_past"]:
+        for p in project_occurrences(nav["first"], nav["last"], today=today):
+            entries.setdefault(p["date"], []).append(
+                (dash.PLANNED, p["due_time"], p["title"], p["chore_id"])
+            )
+    return entries
+
+
+def _month_url(first, today):
+    """``/calendar/`` for the current month, else ``?month=`` from the parsed month."""
+    if first == month.first_of_month(today):
+        return reverse("calendar")
+    return reverse("calendar") + "?month=" + month.month_param(first)
+
+
+def _calendar_context(first, today):
+    nav = month.month_nav(first, today)
+    if nav["is_current"]:
+        # Same ``today`` for the Monday and the call, so this never raises.
+        materialize_week(dash.monday_of(today), today=today)
+    entries = _month_entries(nav, today)
+    dashboard_url = reverse("dashboard")
+    create_url = reverse("chore_create")
+    rows = []
+    for week in month.grid_weeks(first):
+        row = []
+        for day in week:
+            in_month = day.month == first.month
+            cell = {"date": day, "in_month": in_month, "today": in_month and day == today}
+            if in_month:
+                cell.update(month.day_cell(entries.get(day, [])))
+                cell["dashboard_url"] = dashboard_url + dash.dashboard_query(
+                    dash.week_param(dash.monday_of(day)), None, day.isoweekday()
+                )
+                cell["add_url"] = f"{create_url}?date={day.isoformat()}"
+                cell["label"] = month.day_label(day)
+            row.append(cell)
+        rows.append(row)
+    return {
+        "nav": nav,
+        "weekday_headers": month.WEEKDAY_HEADERS,
+        "rows": rows,
+        "is_empty": not entries,
+        "previous_url": _month_url(month.shift_month(first, -1), today) if nav["previous"] else None,
+        "next_url": _month_url(month.shift_month(first, 1), today) if nav["next"] else None,
+        "this_month_url": reverse("calendar"),
+        "create_url": create_url,
+        "switcher_next": _month_url(first, today),
+    }
+
+
+@require_GET
+def calendar(request):
+    today = timezone.localdate()
+    first = month.parse_month(request.GET.get("month"), today) or month.first_of_month(today)
+    context = _calendar_context(first, today)
+    partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
+    template = "chores/_calendar_grid.html" if partial else "chores/calendar.html"
+    response = render(request, template, context)
+    patch_vary_headers(response, ["HX-Request", "HX-History-Restore-Request"])
+    return response
+
+
 def _member_form(member=None, data=None):
     """Edit forms get a per-member id prefix so several rows can coexist."""
     auto_id = f"id_m{member.pk}_%s" if member else "id_%s"
@@ -321,8 +398,8 @@ def profile_switch(request, pk):
     return redirect(target)
 
 
-def _chore_form_page(request, form, chore=None):
-    context = {"form": form, "chore": chore}
+def _chore_form_page(request, form, chore=None, start_date=None):
+    context = {"form": form, "chore": chore, "prefill_date": start_date}
     if chore is None:  # the picker is only offered when creating
         templates = Chore.objects.filter(is_template=True).order_by(Lower("title"), "id")
         builtin = [t for t in templates if t.is_builtin]
@@ -354,9 +431,16 @@ def _save_chore(request, form, chore=None):
 def chore_create(request):
     if request.method == "POST":
         return _save_chore(request, ChoreForm(request.POST))
+    # ?date= is read here only: never on edit, never on POST (#14).
+    start_date = month.parse_date(request.GET.get("date"))
     template = find_template(request.GET.get("template"))
-    form = ChoreForm.from_template(template) if template else ChoreForm()
-    return _chore_form_page(request, form)
+    if template:
+        form = ChoreForm.from_template(template, start_date)
+    elif start_date:
+        form = ChoreForm(initial={"start_date": start_date})
+    else:
+        form = ChoreForm()
+    return _chore_form_page(request, form, start_date=start_date)
 
 
 @require_http_methods(["GET", "POST"])

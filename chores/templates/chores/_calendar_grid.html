@@ -1,0 +1,69 @@
+{% comment %}
+  Month header and grid (#14). Rendered inside calendar.html, and on its own for
+  HTMX month navigation, which swaps the whole #calendar-grid. Every URL is
+  built from parsed dates; nothing from the request is copied into the page.
+{% endcomment %}
+<section id="calendar-grid">
+  <nav class="month-nav" aria-label="Month">
+    <ul>
+      <li>
+        {% if previous_url %}
+          <a href="{{ previous_url }}" aria-label="Previous month"
+             hx-get="{{ previous_url }}"
+             hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true">‹</a>
+        {% endif %}
+      </li>
+    </ul>
+    <ul><li><h1 id="month-title">{{ nav.title }}</h1></li></ul>
+    <ul>
+      <li>
+        {% if next_url %}
+          <a href="{{ next_url }}" aria-label="Next month"
+             hx-get="{{ next_url }}"
+             hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true">›</a>
+        {% endif %}
+      </li>
+    </ul>
+  </nav>
+  {% if not nav.is_current %}
+    <p><a id="this-month" href="{{ this_month_url }}"
+          hx-get="{{ this_month_url }}"
+          hx-target="#calendar-grid" hx-swap="outerHTML" hx-push-url="true">This month</a></p>
+  {% endif %}
+
+  <table>
+    <caption>{{ nav.title }}</caption>
+    <thead>
+      <tr>{% for name in weekday_headers %}<th scope="col">{{ name }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          {% for cell in row %}
+            {% if cell.in_month %}
+              <td{% if cell.today %} class="today" aria-current="date"{% endif %}>
+                <a class="day-number" href="{{ cell.dashboard_url }}"
+                   aria-label="Show {{ cell.label }} on the dashboard">{{ cell.date.day }}</a>
+                {% if cell.count %}
+                  <span class="count" aria-label="{{ cell.count }} chore{{ cell.count|pluralize }}">{{ cell.count }}</span>
+                  <span class="dots">{% for dot in cell.dots %}<span class="dot dot-{{ dot.status }}" title="{{ dot.title }} · {{ dot.label }}"></span>{% endfor %}{% if cell.more %} <small class="more">+{{ cell.more }}</small>{% endif %}</span>
+                {% endif %}
+                <a class="add-chore" href="{{ cell.add_url }}"
+                   aria-label="Add a chore on {{ cell.label }}">+</a>
+              </td>
+            {% else %}
+              <td class="filler">{{ cell.date.day }}</td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if is_empty %}
+    <section id="no-chores">
+      <p>No chores this month</p>
+      <p><a href="{{ create_url }}">Add a chore</a></p>
+    </section>
+  {% endif %}
+</section>

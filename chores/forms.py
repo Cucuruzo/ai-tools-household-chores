@@ -138,9 +138,14 @@ class ChoreForm(forms.ModelForm):
         )
 
     @classmethod
-    def from_template(cls, template):
-        """An unbound create form pre-filled from a template (start date = today)."""
+    def from_template(cls, template, start_date=None):
+        """An unbound create form pre-filled from a template.
+
+        The start date is ``start_date`` when given, today otherwise.
+        """
         initial = {name: getattr(template, name) for name in TEMPLATE_FIELDS}
+        if start_date is not None:
+            initial["start_date"] = start_date
         initial["assigned_to"] = template.assigned_to_id
         initial["template"] = str(template.pk)
         return cls(initial=initial)
