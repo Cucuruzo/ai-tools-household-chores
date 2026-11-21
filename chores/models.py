@@ -80,3 +80,16 @@ class Chore(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class RotationState(models.Model):
+    """Who had the last turn of a rotating chore. Written only by
+    services.advance_rotation (one turn per stored occurrence, #9)."""
+
+    chore = models.OneToOneField(Chore, on_delete=models.CASCADE, related_name="rotation_state")
+    last_member = models.ForeignKey(
+        Member, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    def __str__(self):
+        return f"{self.chore} → {self.last_member or '—'}"

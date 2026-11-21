@@ -115,8 +115,11 @@ Overdue is **derived**: status is `todo` and date/time is in the past.
 | Field       | Type                           |
 |-------------|--------------------------------|
 | id          | AutoField (PK)                 |
-| chore       | OneToOneField(Chore)           |
-| last_member | ForeignKey(Member, nullable)   |
+| chore       | OneToOneField(Chore, on_delete=CASCADE) |
+| last_member | ForeignKey(Member, nullable, on_delete=SET_NULL) |
+
+Rows are created lazily by the first turn. Only `services.advance_rotation`
+writes `last_member`; `services.next_member` is read-only (used by projection).
 
 ### ChoreTemplate
 
