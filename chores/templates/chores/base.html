@@ -4,6 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Household Chores{% endblock %}</title>
+  <script>
+    // Viewer's time zone (#26): store the browser's IANA zone in the "tz"
+    // cookie and reload once when it changed. No loop: after the reload the
+    // cookie matches; if cookies are blocked the read-back fails and there
+    // is no reload; without Intl/timeZone nothing happens.
+    (function () {
+      var zone;
+      try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return; }
+      if (!zone) return;
+      function readCookie() {
+        var m = document.cookie.match(/(?:^|;\s*)tz=([^;]*)/);
+        return m ? m[1] : null;
+      }
+      if (readCookie() === zone) return;
+      document.cookie = "tz=" + zone + "; path=/; max-age=31536000; SameSite=Lax";
+      if (readCookie() === zone) window.location.reload();
+    })();
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
   <style>
@@ -16,6 +34,7 @@
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   <header class="container">
+    <p><time datetime="{{ now_local|date:'c' }}">{{ now_local|date:'D j M, H:i' }}</time></p>
     {% include "chores/_profile_switcher.html" %}
   </header>
   <main class="container">
