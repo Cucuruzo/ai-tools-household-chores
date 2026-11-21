@@ -62,6 +62,7 @@
     {% if filter_week %}<input type="hidden" name="week" value="{{ filter_week }}">{% endif %}
     {% if back_url and filter_member != "" %}<input type="hidden" name="member" value="{{ filter_member }}">{% endif %}
     {% if filter_day %}<input type="hidden" name="day" value="{{ filter_day }}">{% endif %}
+    {% if return_to %}<input type="hidden" name="return_to" value="dashboard">{% endif %}
     {% if not chore and not editing_template %}{{ form.template }}{% endif %}
     {% if scope_occurrence %}<input type="hidden" name="occurrence" value="{{ scope_occurrence.pk }}">{% endif %}
     {{ form.non_field_errors }}

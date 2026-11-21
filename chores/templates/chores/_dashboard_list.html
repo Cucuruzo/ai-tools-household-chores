@@ -32,12 +32,14 @@
           hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">This week</a></p>
   {% endif %}
 
+  <p><a id="add-chore" role="button" href="{{ add_chore_url }}">+ Add Chore</a></p>
+
   {% include "chores/_dashboard_filters.html" %}
 
   {% if is_empty %}
     <section id="no-chores">
       <p>No chores this week</p>
-      <p><a href="{% url 'chore_create' %}">Add a chore</a></p>
+      <p><a href="{{ add_chore_url }}">Add a chore</a></p>
     </section>
   {% elif nav.is_current %}
     {% for key, heading, cards in sections %}

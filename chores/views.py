@@ -19,8 +19,8 @@ from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
 from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
 from .services import (
-    ASSIGNMENT_FIELDS, RULE_FIELDS, apply_future_edit, eligible_pool, materialize_week,
-    project_occurrences, set_occurrence_status, update_occurrence,
+    ASSIGNMENT_FIELDS, RULE_FIELDS, apply_future_edit, eligible_pool, materialize_one_off,
+    materialize_week, project_occurrences, set_occurrence_status, update_occurrence,
 )
 
 
@@ -134,7 +134,20 @@ def _filter_context(nav, member, day):
         return reverse("dashboard") + dash.dashboard_query(week, member, day)
 
     own_week = None if nav["is_current"] else dash.week_param(nav["monday"])
+    # "+ Add Chore" (#19): the day picked by the filter, else today, else the shown Monday.
+    if day is not None:
+        add_date = nav["monday"] + datetime.timedelta(days=day - 1)
+    elif nav["is_current"]:
+        add_date = timezone.localdate()
+    else:
+        add_date = nav["monday"]
+    add_query = dash.dashboard_query(own_week, member, day)
+    add_chore_url = (
+        f"{reverse('chore_create')}?date={add_date.isoformat()}&recurrence=once&return_to=dashboard"
+        + ("&" + add_query[1:] if add_query else "")
+    )
     return {
+        "add_chore_url": add_chore_url,
         "filter_member": "" if member is None else member,
         "filter_day": day,
         "filter_week": own_week,
@@ -435,6 +448,10 @@ def _chore_form_page(request, form, chore=None, start_date=None, filters=None, s
             filter_day=day,
             back_url=reverse("dashboard") + dash.dashboard_query(week, member, day),
         )
+        if chore is None:  # create opened from the dashboard (#19)
+            context["return_to"] = "dashboard"
+            query = dash.dashboard_query(week, member, day)
+            context["picker_return"] = "&return_to=dashboard" + ("&" + query[1:] if query else "")
     if chore is None:  # the picker is only offered when creating
         templates = Chore.objects.filter(is_template=True).order_by(Lower("title"), "id")
         builtin = [t for t in templates if t.is_builtin]
@@ -459,6 +476,9 @@ def _edit_redirect(pk, filters, occurrence=None):
 def _save_chore(request, form, chore=None, filters=None, scope=None):
     """Validate a bound ChoreForm and save; returns a response.
 
+    A new one-off due this week or earlier is stored at once (#19), and a
+    create opened from the dashboard returns there.
+
     With ``scope`` (a recurring chore's edit, #20) a repeating schedule is
     saved "this and future" from ``scope["scope_day"]``.
     """
@@ -479,10 +499,14 @@ def _save_chore(request, form, chore=None, filters=None, scope=None):
             apply_future_edit(chore, old, scope["scope_day"], scope["scope_today"])
         else:
             chore.save()
+        if creating and chore.recurrence == Chore.Recurrence.ONCE:
+            materialize_one_off(chore, timezone.localdate())
         add_template = form.cleaned_data["save_as_template"]
         if add_template:
             form.save_household_template(chore)
     messages.success(request, "Chore saved and template added" if add_template else "Chore saved")
+    if creating and filters is not None:  # opened with return_to=dashboard (#19)
+        return _dashboard_redirect(request.POST)
     return _edit_redirect(chore.pk, filters)
 
 
@@ -529,18 +553,26 @@ def _save_occurrence(request, chore, occurrence, filters, scope):
 
 @require_http_methods(["GET", "POST"])
 def chore_create(request):
+    # return_to=dashboard (exactly) keeps the dashboard view: GET reads the query,
+    # POST the hidden inputs (#19).
+    data = request.POST if request.method == "POST" else request.GET
+    filters = _dashboard_filters(data) if data.get("return_to") == "dashboard" else None
     if request.method == "POST":
-        return _save_chore(request, ChoreForm(request.POST))
-    # ?date= is read here only: never on edit, never on POST (#14).
+        return _save_chore(request, ChoreForm(request.POST), filters=filters)
+    # ?date= and ?recurrence= are read here only: never on edit, never on POST (#14, #19).
     start_date = month.parse_date(request.GET.get("date"))
     template = find_template(request.GET.get("template"))
+    initial = {}
+    if start_date:
+        initial["start_date"] = start_date
+    recurrence = request.GET.get("recurrence")
+    if recurrence in Chore.Recurrence.values:
+        initial["recurrence"] = recurrence
     if template:
         form = ChoreForm.from_template(template, start_date)
-    elif start_date:
-        form = ChoreForm(initial={"start_date": start_date})
     else:
-        form = ChoreForm()
-    return _chore_form_page(request, form, start_date=start_date)
+        form = ChoreForm(initial=initial)
+    return _chore_form_page(request, form, start_date=start_date, filters=filters)
 
 
 @require_http_methods(["GET", "POST"])

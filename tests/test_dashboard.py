@@ -669,7 +669,11 @@ def test_sunday_upcoming_is_empty(client):
 
 def assert_no_chores(body):
     assert "No chores this week" in body
-    assert '<a href="/chores/create/">Add a chore</a>' in body
+    [empty] = re.findall(r'<section id="no-chores">.*?<a href="([^"]*)">Add a chore</a>', body, re.S)
+    [add] = re.findall(r'<a id="add-chore" role="button" href="([^"]*)">', body)
+    assert empty == add
+    assert empty.startswith("/chores/create/?date=")
+    assert "recurrence=once" in empty and "return_to=dashboard" in empty
     assert "<h2>" not in body
 
 

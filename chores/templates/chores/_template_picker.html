@@ -12,8 +12,8 @@
         {% for t in templates %}
           {% url 'chore_create' as create_url %}
           <li>
-            <a href="{{ create_url }}?template={{ t.pk }}{% if prefill_date %}&amp;date={{ prefill_date|date:"Y-m-d" }}{% endif %}"
-               hx-get="{{ create_url }}?template={{ t.pk }}{% if prefill_date %}&amp;date={{ prefill_date|date:"Y-m-d" }}{% endif %}"
+            <a href="{{ create_url }}?template={{ t.pk }}{% if prefill_date %}&amp;date={{ prefill_date|date:"Y-m-d" }}{% endif %}{{ picker_return }}"
+               hx-get="{{ create_url }}?template={{ t.pk }}{% if prefill_date %}&amp;date={{ prefill_date|date:"Y-m-d" }}{% endif %}{{ picker_return }}"
                hx-target="#chore-form-area" hx-select="#chore-form-area"
                hx-swap="outerHTML" hx-push-url="true">{{ t.title }}</a>
           </li>

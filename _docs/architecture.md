@@ -240,6 +240,8 @@ scope. One-off chores ignore `scope` and `occurrence` and save in place
 
 /chores/create/                    GET    chore creation form
 /chores/create/?date=2026-09-08    GET    chore creation with pre-filled date
+/chores/create/?date=2026-09-08&recurrence=once&return_to=dashboard[&week=&member=&day=]
+                                   GET    "+ Add Chore" from the dashboard (#19): back to that view after saving
 /chores/<id>/edit/                 GET    edit chore form (recurring: cutoff D = today)
 /chores/<id>/edit/?occurrence=<pk> GET    edit a recurring chore from one stored row (#20): D = its date,
                                           plus the "This occurrence only" form for a todo row;

@@ -300,6 +300,20 @@ def create_occurrence(chore, day):
     )
 
 
+def materialize_one_off(chore, today):
+    """Store a new one-off chore's occurrence now when it is due by this Sunday (#19).
+
+    Returns the row, or None for a template, a repeating chore or a start
+    date in a later week (``materialize_week`` stores it when that week is
+    current). Call it inside the ``atomic`` block that saved the chore.
+    """
+    if chore.is_template or chore.recurrence != Chore.Recurrence.ONCE:
+        return None
+    if chore.start_date > _monday_of(today) + 6 * ONE_DAY:
+        return None
+    return create_occurrence(chore, chore.start_date)
+
+
 def _materialize_attempt(week_start, today):
     with transaction.atomic():
         projected = project_occurrences(week_start, week_start + 6 * ONE_DAY, today=today)
