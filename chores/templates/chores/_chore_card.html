@@ -16,7 +16,7 @@
   assign swap leaves the block's Delete, status and assign forms in place.
 {% endcomment %}
 {% if card.pk and not card_only %}<div class="card-block" id="card-{{ card.pk }}">
-{% endif %}<article class="chore-card" id="{% if card.pk %}occurrence-{{ card.pk }}{% else %}planned-{{ card.chore_id }}-{{ card.date|date:'Y-m-d' }}{% endif %}">
+{% endif %}<article class="chore-card" id="{% if card.pk %}occurrence-{{ card.pk }}{% else %}planned-{{ card.chore_id }}-{{ card.date|date:'Y-m-d' }}{% endif %}"{% if card_oob %} hx-swap-oob="true"{% endif %}>
   <p class="title">
     <strong><a href="{% url 'chore_edit' card.chore_id %}{{ return_query }}{% if card.pk and card.recurring %}{% if return_query %}&amp;{% else %}?{% endif %}occurrence={{ card.pk }}{% endif %}">{% if card.struck %}<s>{{ card.title }}</s>{% else %}{{ card.title }}{% endif %}</a></strong>
   </p>
