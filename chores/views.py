@@ -47,15 +47,25 @@ def _note(pools, chore, mode, member, is_override):
     return dash.assignee_note(mode, has_member, is_override, pool_empty)
 
 
-def _stored_cards(occurrences, pools):
+def _stored_cards(occurrences, pools, today=None):
+    from . import progress  # progress imports this module, so not at the top
+
+    streaks = progress.chore_streaks(today) if today is not None else {}
     cards = []
     for occ in occurrences.select_related("chore", "member", "completed_by"):
+        chore = occ.chore
+        # The conditions /progress/ lists a chore under, plus 2 or more.
+        streak = streaks.get(occ.chore_id, 0)
+        if (chore.recurrence == Chore.Recurrence.ONCE or streak < 2
+                or (chore.end_date is not None and chore.end_date < today)):
+            streak = 0
         cards.append(dash.Card(
             pk=occ.pk, chore_id=occ.chore_id, title=occ.chore.title, date=occ.date,
             due_time=occ.due_time, points=occ.points, status=occ.status, member=occ.member,
             assignee_note=_note(pools, occ.chore, occ.chore.assignment_mode, occ.member, occ.is_override),
             recurring=occ.chore.recurrence != Chore.Recurrence.ONCE,
             completed_by=occ.completed_by,
+            streak=streak,
         ))
     return cards
 
@@ -91,7 +101,7 @@ def _dashboard_context(monday, today, now, member_filter=None, day_filter=None):
         rows = _shown_occurrences().filter(
             week | Q(status=ChoreOccurrence.Status.TODO, date__lt=nav["monday"])
         )
-        everything = _stored_cards(rows, pools)
+        everything = _stored_cards(rows, pools, today=today)
         # "No chores this week" is decided on the unfiltered week.
         context["is_empty"] = not any(dash.group_current_week(everything, today, now).values())
         shown = dash.filter_cards(everything, nav["monday"], member_filter, day_filter)
@@ -103,7 +113,7 @@ def _dashboard_context(monday, today, now, member_filter=None, day_filter=None):
         ]
         context["done_earlier"] = sections["done_earlier"]
     else:
-        cards = _stored_cards(_shown_occurrences().filter(week), pools)
+        cards = _stored_cards(_shown_occurrences().filter(week), pools, today=today)
         if nav["is_past"]:
             dash.mark_past_overdue(cards)
         else:
@@ -560,7 +570,7 @@ def _toggle_success(request, pk):
         return _dashboard_redirect(request.POST)
     now = timezone.localtime()  # one clock read, viewer's zone (#26)
     today = timezone.localdate(now)
-    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache())
+    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache(), today=today)
     if not cards:  # removed after the write
         raise Http404("No such occurrence")
     [card] = cards
@@ -605,7 +615,7 @@ def _assign_response(request, pk):
         return _dashboard_redirect(request.POST)
     now = timezone.localtime()  # one clock read, viewer's zone (#26)
     today = timezone.localdate(now)
-    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache())
+    cards = _stored_cards(_shown_occurrences().filter(pk=pk), _PoolCache(), today=today)
     if not cards:  # removed after the write
         raise Http404("No such occurrence")
     [card] = cards
