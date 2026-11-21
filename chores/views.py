@@ -18,7 +18,14 @@ from . import dashboard as dash
 from . import month, undo
 from .forms import ChoreForm, MemberForm, OccurrenceForm, find_template
 from .models import Chore, ChoreOccurrence, Member
-from .profile import MAX_PK, _parse_pk, get_active_member, is_valid_pk, set_active_member
+from .profile import (
+    MAX_PK,
+    _parse_pk,
+    clear_active_member,
+    get_active_member,
+    is_valid_pk,
+    set_active_member,
+)
 from .services import (
     ASSIGNMENT_FIELDS, RULE_FIELDS, FutureEditRefused, MoveRefused, OneOffEditRefused, _day_text,
     apply_future_edit, apply_one_off_edit, cancel_projected_date, edit_projected_date,
@@ -457,7 +464,12 @@ def profile_switch(request, pk):
     if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
         raise Http404("No such member")
     member = get_object_or_404(Member, pk=pk)
-    set_active_member(request, member)
+    # Clicking the active member again deselects them. get_active_member also
+    # drops a stale id first, so a deleted active member never blocks a switch.
+    if get_active_member(request) == member:
+        clear_active_member(request)
+    else:
+        set_active_member(request, member)
     target = request.POST.get("next") or request.headers.get("Referer")
     if not target or not url_has_allowed_host_and_scheme(
         target, allowed_hosts={request.get_host()}, require_https=request.is_secure()

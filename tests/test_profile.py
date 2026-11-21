@@ -118,13 +118,16 @@ def test_switch_sets_session_and_redirects_via_next(client):
 
 
 @pytest.mark.django_db
-def test_switch_to_already_active_member(client):
+def test_switch_to_already_active_member_clears_it(client):
     ann = make("Ann")
     switch(client, ann, data={"next": FAMILY})
     response = switch(client, ann, data={"next": FAMILY})
     assert response.status_code == 302
     assert response["Location"] == FAMILY
-    assert client.session["active_member_id"] == ann.pk
+    assert "active_member_id" not in client.session
+    nav = switcher(page(client))
+    assert "Who are you?" in nav
+    assert "aria-current" not in nav and "aria-pressed" not in nav
 
 
 @pytest.mark.django_db

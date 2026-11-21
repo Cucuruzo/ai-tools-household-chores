@@ -10,7 +10,7 @@
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ switcher_next }}">
             {% if active_member and member.pk == active_member.pk %}
-              <button type="submit" class="profile active" aria-current="true">
+              <button type="submit" class="profile active" aria-pressed="true" title="{{ member.name }} (click to deselect)" aria-current="true">
                 <span class="avatar">{{ member.avatar }}</span> <strong>{{ member.name }}</strong>
               </button>
             {% else %}

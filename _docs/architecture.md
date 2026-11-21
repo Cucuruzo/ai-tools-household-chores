@@ -558,7 +558,7 @@ the chore row still exists after the delete:
 /family/<id>/move/?dir=up|down     POST   move member up/down in rotation order
 /family/<id>/delete/               POST   remove member
 
-/profile/<id>/                     POST   switch active member
+/profile/<id>/                     POST   select the member, or deselect when already active
 
 /progress/                         GET    streaks and badges
 /contribution/                     GET    contribution / progress view

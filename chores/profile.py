@@ -44,3 +44,7 @@ def get_active_member(request):
 
 def set_active_member(request, member):
     request.session[SESSION_KEY] = member.pk
+
+
+def clear_active_member(request):
+    request.session.pop(SESSION_KEY, None)
