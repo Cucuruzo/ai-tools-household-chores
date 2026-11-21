@@ -16,7 +16,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from . import dashboard as dash
 from .forms import ChoreForm, MemberForm, find_template
 from .models import Chore, ChoreOccurrence, Member
-from .profile import _parse_pk, is_valid_pk, set_active_member
+from .profile import MAX_PK, _parse_pk, is_valid_pk, set_active_member
 from .services import eligible_pool, materialize_week, project_occurrences
 
 
@@ -168,10 +168,12 @@ def _member_form(member=None, data=None):
     return MemberForm(data, instance=member, auto_id=auto_id)
 
 
-def _render_family(request, add_form=None):
+def _render_family(request, add_form=None, edit_id=None, edit_form=None, remove_id=None):
     members = list(Member.objects.all())
     for m in members:
-        m.edit_form = _member_form(m)
+        m.edit_form = edit_form if m.pk == edit_id and edit_form else _member_form(m)
+        m.editing = m.pk == edit_id
+        m.confirm_remove = m.pk == remove_id
     return render(
         request,
         "chores/family.html",
@@ -187,9 +189,29 @@ def _is_htmx(request):
     return request.headers.get("HX-Request") == "true"
 
 
+def _family_pk_param(request, name):
+    """Return a valid pk from ?<name>=, None if absent; 404 for anything hostile."""
+    values = request.GET.getlist(name)
+    if not values:
+        return None
+    raw = values[0]
+    if len(values) > 1 or not (raw.isascii() and raw.isdigit()):
+        raise Http404
+    pk = int(raw)
+    if not 1 <= pk <= MAX_PK or not Member.objects.filter(pk=pk).exists():
+        raise Http404
+    return pk
+
+
 @require_GET
 def family(request):
-    return _render_family(request)
+    if "edit" in request.GET and "remove" in request.GET:
+        return HttpResponseBadRequest("edit and remove cannot be combined")
+    return _render_family(
+        request,
+        edit_id=_family_pk_param(request, "edit"),
+        remove_id=_family_pk_param(request, "remove"),
+    )
 
 
 @require_POST
@@ -205,9 +227,13 @@ def member_add(request):
 
 @require_POST
 def member_edit(request, pk):
+    if not is_valid_pk(pk):
+        raise Http404
     member = get_object_or_404(Member, pk=pk)
     form = _member_form(member, request.POST)
     editing = not form.is_valid()
+    if editing and not _is_htmx(request):
+        return _render_family(request, edit_id=pk, edit_form=form)
     if not editing and not _is_htmx(request):
         form.save()
         return redirect("family")
@@ -235,6 +261,8 @@ def member_edit(request, pk):
 
 @require_POST
 def member_move(request, pk):
+    if not is_valid_pk(pk):
+        raise Http404
     member = get_object_or_404(Member, pk=pk)
     direction = request.GET.get("dir")
     if direction not in ("up", "down"):
@@ -263,6 +291,8 @@ def member_move(request, pk):
 
 @require_POST
 def member_delete(request, pk):
+    if not is_valid_pk(pk):
+        raise Http404
     get_object_or_404(Member, pk=pk).delete()
     if not _is_htmx(request):
         return redirect("family")
