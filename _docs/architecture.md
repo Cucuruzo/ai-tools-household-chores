@@ -93,7 +93,7 @@ On deletion: active chore occurrences assigned to this member become unassigned.
 | is_template      | BooleanField (default False)                             |
 | is_builtin       | BooleanField (default False) — built-in template shipped with the app (read-only) |
 | template_source  | ForeignKey('self', nullable, SET_NULL) — template (built-in or household) it was created from |
-| end_date         | DateField (nullable) — last date the chore is projected on; set by "delete this and future" (#5), never moved later; without history the chore row is deleted only when nothing before D remains (no stored row, no projected date) (#42) |
+| end_date         | DateField (nullable) — last date the chore is projected on; set by "delete this and future" (#5), never moved later; without history the chore row is deleted only when nothing before D remains (no stored row, no projected date) (#42); a "this only" delete that leaves nothing to show up to `end_date` deletes the chore row too (#43) |
 
 ### ChoreOccurrence
 
@@ -113,7 +113,7 @@ becomes current or when a one-off / ad-hoc chore is added.
 | done_at     | DateTimeField (nullable) — completion time, stored in UTC (#12) |
 | is_override | BooleanField (default False) — edited for this occurrence only: set by #13 assign and #20 this occurrence only; never changed by a later this-and-future edit |
 | points      | IntegerField — copied from the chore when stored |
-| is_cancelled | BooleanField (default False) — "delete this occurrence only" (#5); the row stays so it is never recreated, and it is hidden everywhere |
+| is_cancelled | BooleanField (default False) — "delete this occurrence only" (#5); the row stays so it is never recreated, and it is hidden everywhere, unless the chore has an `end_date` and nothing is left to show, then the chore and its rows are deleted (#43) |
 | completed_by | ForeignKey(Member, nullable, on_delete=SET_NULL) — the member credited with the points (#12); `member` stays the assignee |
 
 **Unique constraint:** (chore, date)
@@ -421,7 +421,8 @@ the chore row still exists after the delete:
   row / exception on those dates was stored since.
 - `chore`: the chore row is gone; it is re-inserted with every row,
   exception and its `RotationState`. FKs to removed members or templates
-  come back NULL.
+  come back NULL. Also after a "this only" delete that leaves the chore
+  nothing to show (#43), with the state from before that cancel.
 
 ## Screens and URL Design
 

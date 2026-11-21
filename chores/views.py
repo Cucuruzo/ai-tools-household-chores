@@ -732,6 +732,24 @@ def _end_before(chore, day):
         chore.save(update_fields=["end_date"])
 
 
+def _left_to_show(chore, last, today):
+    """True when ``chore`` still has something to show, read after a delete wrote.
+
+    Cheap checks first: a done / skipped row (any ``is_cancelled``), a to-do
+    row that is not cancelled, or a date projected in [this week's Monday,
+    ``last``] for the viewer's ``today`` (#26). Projection covers plain dates,
+    override exceptions and #48 extras, never cancelled exceptions or rows.
+    """
+    if chore.occurrences.filter(status__in=_HISTORY).exists():
+        return True
+    if chore.occurrences.filter(status=ChoreOccurrence.Status.TODO, is_cancelled=False).exists():
+        return True
+    monday = dash.monday_of(today)
+    return last >= monday and any(
+        o["chore_id"] == chore.pk for o in project_occurrences(monday, last, today=today)
+    )
+
+
 def _delete_from(chore, start, today):
     """"This and future" from ``start``: to-do rows on/after it go, nothing before it does.
 
@@ -746,17 +764,7 @@ def _delete_from(chore, start, today):
     """
     chore.occurrences.filter(status=ChoreOccurrence.Status.TODO, date__gte=start).delete()
     chore.exceptions.filter(date__gte=start).delete()
-    last = start - datetime.timedelta(days=1)
-    keep = (
-        chore.occurrences.filter(status__in=_HISTORY).exists()
-        or chore.occurrences.filter(status=ChoreOccurrence.Status.TODO, is_cancelled=False).exists()
-    )
-    if not keep:
-        monday = dash.monday_of(today)
-        keep = last >= monday and any(
-            o["chore_id"] == chore.pk for o in project_occurrences(monday, last, today=today)
-        )
-    if keep:
+    if _left_to_show(chore, start - datetime.timedelta(days=1), today):
         _end_before(chore, start)
     else:
         chore.delete()  # occurrences and RotationState go by CASCADE
@@ -769,7 +777,14 @@ def chore_delete(request, pk):
 
     ``date`` must be a projected date of the chore for the viewer's
     ``today`` (#26). ``today`` is read at most once, and the same value is
-    used for that check and for ``_delete_from``.
+    used for that check, for ``_delete_from`` and for ``_left_to_show``.
+
+    "This only" on a recurring chore with an ``end_date`` (#43): the chore is
+    snapshotted before the cancel is written, and if nothing is left to show
+    up to ``end_date`` afterwards, the chore row is deleted in the same
+    transaction (rows, exceptions and RotationState by CASCADE). Undo then
+    gets kind ``chore`` with the pre-cancel snapshot. Without an ``end_date``
+    the chore always has dates ahead, so no snapshot or check is made.
     """
     if not is_valid_pk(pk):  # out-of-range ids would overflow the DB query
         raise Http404("No such chore")
@@ -809,15 +824,23 @@ def chore_delete(request, pk):
             if scope not in ("this", "future"):
                 return HttpResponseBadRequest("scope must be 'this' or 'future'")
             if scope == "this":
+                if day is None and (occurrence is None or occurrence.status != ChoreOccurrence.Status.TODO):
+                    return HttpResponseBadRequest("Only a to-do occurrence can be deleted on its own")
+                # Only a chore with an end_date can run out of dates to show (#43).
+                snap = undo.snapshot(chore) if chore.end_date is not None else None
                 if day is not None:
                     undone = ("planned", {"date": day.isoformat(), "exception": undo.exception_on(chore, day)})
                     cancel_projected_date(chore, day)
-                elif occurrence is None or occurrence.status != ChoreOccurrence.Status.TODO:
-                    return HttpResponseBadRequest("Only a to-do occurrence can be deleted on its own")
                 else:
                     occurrence.is_cancelled = True
                     occurrence.save(update_fields=["is_cancelled"])
                     undone = ("cancel", {"occurrence_id": occurrence.pk})
+                if snap is not None:
+                    if today is None:
+                        today = timezone.localdate()
+                    if not _left_to_show(chore, chore.end_date, today):
+                        chore.delete()  # occurrences, exceptions and RotationState by CASCADE
+                        undone = ("chore", snap)
             else:
                 if today is None:
                     today = timezone.localdate()

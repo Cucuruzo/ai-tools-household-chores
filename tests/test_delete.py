@@ -1014,3 +1014,223 @@ def test_query_count_does_not_depend_on_stored_rows(client):
             delete(client, c.pk, scope="future", occurrence=friday.pk)
         counts.append(len(queries))
     assert counts[0] == counts[1]
+
+
+# --- Nothing left to show after "this only" (#43) ---
+
+from chores import undo  # noqa: E402
+from chores.models import OccurrenceException  # noqa: E402
+
+SCREENS = ("/dashboard/", "/calendar/", "/history/", "/progress/")
+KIRI_ROLLOVER = "2026-11-22T10:01:00"  # Sun 11-22 in UTC, Mon 11-23 00:01 in Kiritimati
+
+
+def undo_kind(client):
+    found = client.session.get(undo.SLOT)
+    return found["kind"] if found else None
+
+
+def screen_has(client, title, when=WED):
+    """Whether ``title`` appears as a chore on any of the four screens."""
+    with at(when):
+        bodies = [client.get(url).content.decode() for url in SCREENS]
+    return any(re.search(rf">\s*{re.escape(title)}\s*<|title=\"{re.escape(title)} · ", b) for b in bodies)
+
+
+def trimmed_trash(client, history=False):
+    """Example A: Trash weekly Wed from 11-04, to-do 11-11 and 11-18, then
+    "this and future" from the 11-18 card (#42 keeps it, kind trim)."""
+    c = weekly()
+    if history:
+        row(c, "2026-11-04", status="done")
+    old = row(c, "2026-11-11")
+    wed = row(c, "2026-11-18")
+    assert delete(client, c.pk, scope="future", occurrence=wed.pk).status_code == 302
+    c.refresh_from_db()
+    assert c.end_date == d("2026-11-17")
+    assert undo_kind(client) == "trim"
+    return c, old
+
+
+def planned_card(body, c, day):
+    return f'id="planned-{c.pk}-{day}"' in body
+
+
+@pytest.mark.django_db
+def test_43_a_this_only_deletes_the_chore_with_nothing_left(client):
+    c, old = trimmed_trash(client)
+    assert screen_has(client, "Trash")
+    with mock.patch("chores.views.timezone.localdate", wraps=timezone.localdate) as spy_:
+        assert delete(client, c.pk, scope="this", occurrence=old.pk).status_code == 302
+    assert spy_.call_count == 1
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    assert not ChoreOccurrence.objects.filter(chore_id=c.pk).exists()
+    assert client.get(f"/chores/{c.pk}/edit/").status_code == 404
+    assert not screen_has(client, "Trash")
+    s = client.session[undo.SLOT]
+    assert s["kind"] == "chore"
+    assert s["chore"]["end_date"] == "2026-11-17"
+    assert [(o["id"], o["date"], o["is_cancelled"]) for o in s["occurrences"]] == [
+        (old.pk, "2026-11-11", False)]
+
+
+@pytest.mark.django_db
+def test_43_b_planned_date_in_a_later_week(client):
+    c = weekly(start="2026-11-25")
+    assert delete(client, c.pk, scope="future", date="2026-12-02", week="2026-W49").status_code == 302
+    c.refresh_from_db()
+    assert c.end_date == d("2026-12-01")
+    with mock.patch("chores.views.timezone.localdate", wraps=timezone.localdate) as spy_:
+        assert delete(client, c.pk, scope="this", date="2026-11-25", week="2026-W48").status_code == 302
+    assert spy_.call_count == 1
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    assert not OccurrenceException.objects.filter(chore_id=c.pk).exists()
+    s = client.session[undo.SLOT]
+    assert s["kind"] == "chore" and s["exceptions"] == [] and s["occurrences"] == []
+
+
+@pytest.mark.django_db
+def test_43_c_history_keeps_the_chore(client):
+    c, old = trimmed_trash(client, history=True)
+    assert delete(client, c.pk, scope="this", occurrence=old.pk).status_code == 302
+    c.refresh_from_db()
+    assert c.end_date == d("2026-11-17")
+    old.refresh_from_db()
+    assert old.is_cancelled is True
+    assert undo_kind(client) == "cancel"
+    with at(WED):
+        history = client.get("/history/").content.decode()
+    assert "Trash" in history and ("2026-11-04" in history or "4 Nov" in history)
+
+
+@pytest.mark.django_db
+def test_43_d_no_end_date_keeps_the_chore_without_a_snapshot(client):
+    c = weekly()
+    old = row(c, "2026-11-11")
+    with mock.patch("chores.views.undo.snapshot", wraps=undo.snapshot) as snap, \
+            mock.patch("chores.views.timezone.localdate", wraps=timezone.localdate) as spy_:
+        assert delete(client, c.pk, scope="this", occurrence=old.pk).status_code == 302
+    snap.assert_not_called()
+    assert spy_.call_count == 0
+    c.refresh_from_db()
+    assert c.end_date is None
+    assert undo_kind(client) == "cancel"
+
+
+@pytest.mark.django_db
+def test_43_e_an_override_keeps_the_chore_until_it_is_deleted(client):
+    a = member("A", order=0)
+    c = weekly(start="2026-11-25", end_date=d("2026-12-08"))
+    OccurrenceException.objects.create(chore=c, date=d("2026-12-02"), is_override=True, member=a)
+    assert delete(client, c.pk, scope="this", date="2026-11-25", week="2026-W48").status_code == 302
+    assert Chore.objects.filter(pk=c.pk).exists()
+    assert undo_kind(client) == "planned"
+    w49 = page(client, "2026-W49")
+    assert planned_card(w49, c, "2026-12-02")
+    article = re.search(rf'<article class="chore-card" id="planned-{c.pk}-2026-12-02">(.*?)</article>', w49, re.S)
+    assert '<span class="name">A</span>' in article.group(1)
+    assert delete(client, c.pk, scope="this", date="2026-12-02", week="2026-W49").status_code == 302
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    assert undo_kind(client) == "chore"
+
+
+@pytest.mark.django_db
+def test_43_f_an_extra_keeps_the_chore_until_it_is_deleted(client):
+    c = weekly(end_date=d("2026-12-08"))
+    old = row(c, "2026-11-11")
+    row(c, "2026-11-18", is_cancelled=True)
+    for day in ("2026-11-25", "2026-12-02"):
+        OccurrenceException.objects.create(chore=c, date=d(day), is_cancelled=True)
+    OccurrenceException.objects.create(
+        chore=c, date=d("2026-12-05"), moved_from=d("2026-12-02"), is_override=True,
+        title=c.title, instructions=c.instructions, points=c.points)
+    assert delete(client, c.pk, scope="this", occurrence=old.pk).status_code == 302
+    assert Chore.objects.filter(pk=c.pk).exists()
+    assert undo_kind(client) == "cancel"
+    projected = [(o["chore_id"], str(o["date"])) for o in
+                 project_occurrences(d("2026-11-16"), d("2026-12-08"), today=TODAY)]
+    assert projected == [(c.pk, "2026-12-05")]
+    assert planned_card(page(client, "2026-W49"), c, "2026-12-05")
+    assert delete(client, c.pk, scope="this", date="2026-12-05", week="2026-W49").status_code == 302
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    assert not OccurrenceException.objects.filter(chore_id=c.pk).exists()
+    assert undo_kind(client) == "chore"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("tz, kept, kind", [
+    (None, True, "cancel"),
+    ("Pacific/Kiritimati", False, "chore"),
+])
+def test_43_g_viewer_zone_decides_this_week(client, tz, kept, kind):
+    bins = weekly("Bins", weekday=6, start="2026-11-08", end_date=d("2026-11-22"))
+    sun = row(bins, "2026-11-15")
+    assert delete(client, bins.pk, when=KIRI_ROLLOVER, tz=tz, scope="this", occurrence=sun.pk).status_code == 302
+    assert Chore.objects.filter(pk=bins.pk).exists() is kept
+    assert undo_kind(client) == kind
+    assert not ChoreOccurrence.objects.filter(chore_id=bins.pk, date=d("2026-11-22")).exists()
+
+
+def _example_a_this_only(client, from_edit_page):
+    c, old = trimmed_trash(client)
+    data = {"scope": "this", "occurrence": old.pk}
+    if from_edit_page:
+        # The edit page of that occurrence posts to the same delete URL; its
+        # hidden inputs go with the same occurrence and scope as the card's.
+        with at(WED):
+            response = client.get(f"/chores/{c.pk}/edit/", {"occurrence": old.pk})
+        assert response.status_code == 200
+        body = response.content.decode()
+        form = re.search(rf'<form[^>]*action="/chores/{c.pk}/delete/"[^>]*>(.*?)</form>', body, re.S)
+        assert form is not None
+        data = {**hidden(form.group(1)), **data}
+    assert delete(client, c.pk, **data).status_code == 302
+    s = dict(client.session[undo.SLOT])
+    for key in ("token", "created"):
+        s.pop(key)
+    return state(), list(OccurrenceException.objects.values()), s
+
+
+@pytest.mark.django_db
+def test_43_h_edit_page_matches_the_card(client):
+    from_card = _example_a_this_only(client, from_edit_page=False)
+    Chore.objects.filter(is_template=False).delete()
+    other = Client()
+    from_edit = _example_a_this_only(other, from_edit_page=True)
+    assert from_card[0] == from_edit[0]
+    assert not Chore.objects.filter(is_template=False).exists()
+    assert from_card[1] == from_edit[1] == []
+    assert from_edit[2]["kind"] == from_card[2]["kind"] == "chore"
+    # Same shape; the ids differ because the chore was made twice.
+    assert [o["date"] for o in from_edit[2]["occurrences"]] == [o["date"] for o in from_card[2]["occurrences"]]
+    assert from_edit[2]["chore"]["end_date"] == from_card[2]["chore"]["end_date"] == "2026-11-17"
+
+
+@pytest.mark.django_db
+def test_43_failure_in_chore_delete_rolls_back_everything(client):
+    c, old = trimmed_trash(client)
+    trim = dict(client.session[undo.SLOT])
+    before = (state(), list(OccurrenceException.objects.values()))
+    with mock.patch.object(Chore, "delete", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            delete(client, c.pk, scope="this", occurrence=old.pk)
+    assert (state(), list(OccurrenceException.objects.values())) == before
+    old.refresh_from_db()
+    assert old.is_cancelled is False
+    assert client.session[undo.SLOT] == trim
+
+
+@pytest.mark.django_db
+def test_43_query_count_does_not_depend_on_stored_rows(client):
+    counts = []
+    for extra in (False, True):
+        Chore.objects.filter(is_template=False).delete()
+        c, old = trimmed_trash(client)
+        if extra:
+            row(c, "2026-11-04", is_cancelled=True)
+            OccurrenceException.objects.create(chore=c, date=d("2026-11-14"), is_cancelled=True)
+        with CaptureQueriesContext(connection) as queries:
+            delete(client, c.pk, scope="this", occurrence=old.pk)
+        assert not Chore.objects.filter(pk=c.pk).exists()
+        counts.append(len(queries))
+    assert counts[0] == counts[1]
