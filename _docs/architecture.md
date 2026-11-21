@@ -93,7 +93,7 @@ On deletion: active chore occurrences assigned to this member become unassigned.
 | is_template      | BooleanField (default False)                             |
 | is_builtin       | BooleanField (default False) — built-in template shipped with the app (read-only) |
 | template_source  | ForeignKey('self', nullable, SET_NULL) — template (built-in or household) it was created from |
-| end_date         | DateField (nullable) — last date the chore is projected on; set by "delete this and future" (#5), never moved later |
+| end_date         | DateField (nullable) — last date the chore is projected on; set by "delete this and future" (#5), never moved later; without history the chore row is deleted only when nothing before D remains (no stored row, no projected date) (#42) |
 
 ### ChoreOccurrence
 

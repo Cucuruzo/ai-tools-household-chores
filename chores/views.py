@@ -584,10 +584,26 @@ def _end_before(chore, day):
         chore.save(update_fields=["end_date"])
 
 
-def _delete_from(chore, start):
-    """"This and future" from ``start``: todo rows on/after it go, history stays."""
+def _delete_from(chore, start, today):
+    """"This and future" from ``start``: to-do rows on/after it go, nothing before it does.
+
+    The chore is kept with ``end_date = start - 1`` when something before
+    ``start`` is left to show: a done / skipped row, a non-cancelled to-do row,
+    or a date still projected from this week's Monday. Otherwise the chore row
+    goes, with its cancelled rows and RotationState (CASCADE).
+    """
     chore.occurrences.filter(status=ChoreOccurrence.Status.TODO, date__gte=start).delete()
-    if chore.occurrences.filter(status__in=_HISTORY).exists():
+    last = start - datetime.timedelta(days=1)
+    keep = (
+        chore.occurrences.filter(status__in=_HISTORY).exists()
+        or chore.occurrences.filter(status=ChoreOccurrence.Status.TODO, is_cancelled=False).exists()
+    )
+    if not keep:
+        monday = dash.monday_of(today)
+        keep = last >= monday and any(
+            o["chore_id"] == chore.pk for o in project_occurrences(monday, last, today=today)
+        )
+    if keep:
         _end_before(chore, start)
     else:
         chore.delete()  # occurrences and RotationState go by CASCADE
@@ -624,8 +640,9 @@ def chore_delete(request, pk):
                 occurrence.is_cancelled = True
                 occurrence.save(update_fields=["is_cancelled"])
             else:
-                start = occurrence.date if occurrence else timezone.localdate()
-                _delete_from(chore, start)
+                today = timezone.localdate()
+                start = occurrence.date if occurrence else today
+                _delete_from(chore, start, today)
     messages.success(request, "Chore deleted")
     return _dashboard_redirect(request.POST)
 

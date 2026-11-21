@@ -749,3 +749,263 @@ def test_repeat_future_on_kept_chore_changes_nothing(client, history_chore, from
     before = state()
     assert delete(client, c.pk, **data).status_code == 302
     assert state() == before
+
+
+# --- No history: dates before D stay (#42) -------------------------------------------------
+
+from django.db import connection  # noqa: E402
+from django.utils import timezone  # noqa: E402
+from django.test.utils import CaptureQueriesContext  # noqa: E402
+
+from chores.views import _delete_from  # noqa: E402
+
+TODAY = d("2026-11-18")
+
+
+def daily_dishes():
+    return weekly("Dishes", weekday=None, recurrence="daily", start="2026-11-16")
+
+
+def dishes_week(client):
+    """Daily Dishes from Mon 11-16 with the current week stored by the dashboard."""
+    c = daily_dishes()
+    page(client)
+    assert dates(c) == [f"2026-11-{n}" for n in range(16, 23)]
+    return c
+
+
+def calendar_dots(client, title, month=None):
+    """{day number: dot count for ``title``} from the calendar page."""
+    with at(WED):
+        response = client.get("/calendar/", {"month": month} if month else {})
+    assert response.status_code == 200
+    found = {}
+    for cell in re.findall(r"<td[^>]*>(.*?)</td>", response.content.decode(), re.S):
+        day = re.search(r'class="day-number"[^>]*>(\d+)<', cell)
+        n = len(re.findall(rf'title="{title} · ', cell))
+        if day and n:
+            found[int(day.group(1))] = n
+    return found
+
+
+def screen_titles(body):
+    return {key: [card["title"] for card in cards_] for key, cards_ in sections(body).items()}
+
+
+@pytest.mark.django_db
+def test_a_card_in_current_week_keeps_rows_before_d(client):
+    c = dishes_week(client)
+    before = {o.date: (o.pk, o.member_id, o.points) for o in c.occurrences.all()}
+    friday = c.occurrences.get(date=d("2026-11-20"))
+    assert delete(client, c.pk, scope="future", occurrence=friday.pk).status_code == 302
+    c.refresh_from_db()
+    assert c.end_date == d("2026-11-19")
+    assert dates(c) == [f"2026-11-{n}" for n in range(16, 20)]
+    for o in c.occurrences.all():
+        assert (o.pk, o.member_id, o.points) == before[o.date]
+    assert client.get(f"/chores/{c.pk}/edit/").status_code == 200
+
+
+@pytest.mark.django_db
+def test_a_screens_afterwards(client):
+    c = dishes_week(client)
+    pk = c.pk
+    with at(WED):
+        history_before = no_csrf(client.get("/history/").content.decode())
+        progress_before = no_csrf(client.get("/progress/").content.decode())
+    friday = c.occurrences.get(date=d("2026-11-20"))
+    delete(client, pk, scope="future", occurrence=friday.pk)
+
+    body = page(client)
+    shown = sections(body)
+    assert [(card["title"], card["date"]) for card in shown["overdue"]] == [
+        ("Dishes", shown["overdue"][0]["date"]), ("Dishes", shown["overdue"][1]["date"])]
+    assert len(shown["overdue"]) == 2
+    assert [card["id"] for card in shown["overdue"]] == list(
+        c.occurrences.filter(date__in=[d("2026-11-16"), d("2026-11-17")]).order_by("date").values_list("pk", flat=True))
+    assert len(shown["today"]) == 1 and len(shown["upcoming"]) == 1
+    assert shown["upcoming"][0]["id"] == c.occurrences.get(date=d("2026-11-19")).pk
+    for key in ("overdue", "today", "upcoming"):
+        for card in shown[key]:
+            fragment = controls(body)[card["id"]]
+            assert scopes(fragment) == ["this", "future"]
+
+    snap = snapshot_rows()
+    w48 = page(client, "2026-W48")
+    assert "Dishes" not in {t for ts in screen_titles(w48).values() for t in ts}
+    assert "Planned" not in w48 or "Dishes" not in w48
+    assert snapshot_rows() == snap
+    assert dates(c) == [f"2026-11-{n}" for n in range(16, 20)]
+
+    assert calendar_dots(client, "Dishes") == {16: 1, 17: 1, 18: 1, 19: 1}
+    assert calendar_dots(client, "Dishes", "2026-12") == {}
+    with at(WED):
+        calendar = client.get("/calendar/").content.decode()
+    assert calendar.count("dot-overdue") >= 2
+
+    with at(WED):
+        assert no_csrf(client.get("/history/").content.decode()) == history_before
+        progress = no_csrf(client.get("/progress/").content.decode())
+    assert progress == progress_before
+    assert f'id="streak-{pk}"' not in progress
+
+
+def no_csrf(body):
+    return re.sub(r'csrf[A-Za-z_]*"?[:=] ?[\'"][A-Za-z0-9]+[\'"]', "csrf", body, flags=re.I)
+
+
+def snapshot_rows():
+    return sorted(ChoreOccurrence.objects.values_list("id", "chore_id", "date", "status", "member_id"))
+
+
+@pytest.mark.django_db
+def test_b_overdue_rotating_then_nothing_left(client):
+    a, b = member("A", order=0), member("B", order=1)
+    c = weekly("Trash", mode="rotating", eligibility="kids")
+    old = row(c, "2026-11-11", member=a)
+    RotationState.objects.update_or_create(chore=c, defaults={"last_member": a})
+    body = page(client)  # stores 11-18
+    assert [card["id"] for card in sections(body)["overdue"]] == [old.pk]
+    last = RotationState.objects.get(chore=c).last_member_id
+    wed = c.occurrences.get(date=d("2026-11-18"))
+
+    assert delete(client, c.pk, scope="future", occurrence=wed.pk).status_code == 302
+    c.refresh_from_db()
+    assert c.end_date == d("2026-11-17")
+    assert dates(c) == ["2026-11-11"]
+    old.refresh_from_db()
+    assert old.member_id == a.pk
+    assert [card["id"] for card in sections(page(client))["overdue"]] == [old.pk]
+    assert RotationState.objects.get(chore=c).last_member_id == last  # kept, not written
+
+    # Repeat from the edit page (D = 11-18) writes nothing and answers 302.
+    before = state()
+    assert delete(client, c.pk, scope="future").status_code == 302
+    assert state() == before
+
+    assert delete(client, c.pk, scope="future", occurrence=old.pk).status_code == 302
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    assert not RotationState.objects.filter(chore_id=c.pk).exists()
+    assert not ChoreOccurrence.objects.filter(chore_id=c.pk).exists()
+    assert client.get(f"/chores/{c.pk}/edit/").status_code == 404
+    assert delete(client, c.pk, scope="future", occurrence=old.pk).status_code == 404
+    assert b.pk
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("tz, d_day, kept", [
+    (None, "2026-11-18", ["2026-11-16", "2026-11-17"]),
+    ("Pacific/Kiritimati", "2026-11-19", ["2026-11-16", "2026-11-17", "2026-11-18"]),
+])
+def test_c_edit_page_uses_viewer_today_once(client, tz, d_day, kept):
+    c = dishes_week(client)
+    with mock.patch("chores.views.timezone.localdate", wraps=timezone.localdate) as spy_:
+        response = delete(client, c.pk, tz=tz, scope="future")
+    assert response.status_code == 302
+    assert spy_.call_count == 1
+    c.refresh_from_db()
+    assert c.end_date == d(d_day) - datetime.timedelta(days=1)
+    assert dates(c) == kept
+    overdue = [card["date"] for card in sections(page(client, tz=tz))["overdue"]]
+    assert len(overdue) == len([k for k in kept if k < str(TODAY if tz is None else d("2026-11-19"))])
+
+
+@pytest.mark.django_db
+def test_d_only_cancelled_rows_before_d(client):
+    c = weekly("Trash")
+    cancelled = row(c, "2026-11-11", is_cancelled=True)
+    wed = row(c, "2026-11-18")
+    assert delete(client, c.pk, scope="future", occurrence=wed.pk).status_code == 302
+    assert not Chore.objects.filter(pk=c.pk).exists()
+    assert not ChoreOccurrence.objects.filter(pk=cancelled.pk).exists()
+
+
+@pytest.mark.django_db
+def test_e_projected_dates_before_d_nothing_stored(db):
+    bins = weekly("Bins", weekday=3, start="2026-11-26")
+    _delete_from(bins, d("2026-12-10"), TODAY)
+    bins.refresh_from_db()
+    assert bins.end_date == d("2026-12-09")
+    projected = [(o["chore_id"], str(o["date"])) for o in
+                 project_occurrences(d("2026-11-23"), d("2026-12-20"), today=TODAY)]
+    assert projected == [(bins.pk, "2026-11-26"), (bins.pk, "2026-12-03")]
+
+    other = weekly("Bins2", weekday=3, start="2026-11-26")
+    _delete_from(other, d("2026-11-26"), TODAY)
+    assert not Chore.objects.filter(pk=other.pk).exists()
+
+
+@pytest.mark.django_db
+def test_e_edit_page_before_start_date_deletes_chore(client):
+    bins = weekly("Bins", weekday=3, start="2026-11-26")
+    assert delete(client, bins.pk, scope="future").status_code == 302
+    assert not Chore.objects.filter(pk=bins.pk).exists()
+
+
+@pytest.mark.django_db
+def test_f_current_week_not_materialized_yet(client):
+    c = daily_dishes()
+    assert ChoreOccurrence.objects.count() == 0
+    assert delete(client, c.pk, scope="future").status_code == 302
+    c.refresh_from_db()
+    assert c.end_date == d("2026-11-17")
+    assert client.get(f"/chores/{c.pk}/edit/").status_code == 200
+    body = page(client)
+    assert dates(c) == ["2026-11-16", "2026-11-17"]
+    assert [card["title"] for card in sections(body)["overdue"]] == ["Dishes", "Dishes"]
+
+
+@pytest.mark.django_db
+def test_future_start_chore_with_projection_before_d_is_trimmed_not_deleted(client):
+    c = weekly("Bins", weekday=3, start="2026-11-26")
+    before = state()
+    _delete_from(c, d("2026-12-03"), TODAY)
+    c.refresh_from_db()
+    assert c.end_date == d("2026-12-02")
+    assert state() != before
+
+
+@pytest.mark.django_db
+def test_kept_chore_does_not_write_rotation(client):
+    a, b = member("A", order=0), member("B", order=1)
+    c = weekly("Trash", mode="rotating", eligibility="kids")
+    row(c, "2026-11-11", member=a)
+    RotationState.objects.update_or_create(chore=c, defaults={"last_member": b})
+    wed = row(c, "2026-11-18", member=b)
+    delete(client, c.pk, scope="future", occurrence=wed.pk)
+    assert RotationState.objects.get(chore=c).last_member_id == b.pk
+
+
+@pytest.mark.django_db
+def test_one_off_with_overdue_row_is_still_deleted(client):
+    c = chore("Once", start_date="2026-11-16")
+    o = row(c, "2026-11-16")
+    assert delete(client, c.pk, scope="future", occurrence=o.pk).status_code == 302
+    assert not Chore.objects.filter(pk=c.pk).exists()
+
+
+@pytest.mark.django_db
+def test_no_history_failure_rolls_back_everything(client):
+    c = dishes_week(client)
+    friday = c.occurrences.get(date=d("2026-11-20"))
+    before = state()
+    with mock.patch.object(Chore, "save", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            delete(client, c.pk, scope="future", occurrence=friday.pk)
+    assert state() == before
+
+
+@pytest.mark.django_db
+def test_query_count_does_not_depend_on_stored_rows(client):
+    counts = []
+    for extra in (0, 14):
+        ChoreOccurrence.objects.all().delete()
+        Chore.objects.filter(title="Dishes").delete()
+        c = dishes_week(client)
+        for n in range(extra):
+            row(c, str(d("2026-11-23") + datetime.timedelta(days=n)))
+        friday = c.occurrences.get(date=d("2026-11-20"))
+        with CaptureQueriesContext(connection) as queries:
+            delete(client, c.pk, scope="future", occurrence=friday.pk)
+        counts.append(len(queries))
+    assert counts[0] == counts[1]
