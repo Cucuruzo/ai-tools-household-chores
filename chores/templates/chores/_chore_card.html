@@ -1,0 +1,19 @@
+{% comment %}
+  One chore occurrence (#10). Stored cards carry id="occurrence-<pk>" for
+  #5, #12 and #13; projected cards (status "Planned") have no id.
+{% endcomment %}
+<article class="chore-card"{% if card.pk %} id="occurrence-{{ card.pk }}"{% endif %}>
+  <p class="title">
+    <strong><a href="{% url 'chore_edit' card.chore_id %}">{% if card.struck %}<s>{{ card.title }}</s>{% else %}{{ card.title }}{% endif %}</a></strong>
+  </p>
+  <p class="assignee">
+    {% if card.member %}<span class="avatar">{{ card.member.avatar }}</span> <span class="name">{{ card.member.name }}</span>{% else %}<span class="unassigned">{{ card.assignee_note }}</span>{% endif %}
+  </p>
+  <p>
+    <small>
+      <time class="date" datetime="{{ card.date|date:'Y-m-d' }}">{{ card.date|date:"D, M j" }}</time>{% if card.due_time %} · <span class="due-time">{{ card.due_time|time:"H:i" }}</span>{% endif %}
+      · <span class="points">{{ card.points }} pts</span>
+      · <span class="status">{{ card.label }}</span>
+    </small>
+  </p>
+</article>

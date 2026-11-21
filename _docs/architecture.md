@@ -203,7 +203,7 @@ are never scheduled directly.
 +-------------------------------------------------------+
 | [Profile switcher: avatar + name]     Household Chores |
 +-------------------------------------------------------+
-| < This Week (Sep 8 - 14, 2026) >    [+ Add Chore]     |
+| < This Week (Sep 7 - 13, 2026) >    [+ Add Chore]     |
 | Filters: [Member v] [Day v]                           |
 +-------------------------------------------------------+
 | OVERDUE                                                |

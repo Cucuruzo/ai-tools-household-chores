@@ -1,0 +1,66 @@
+{% comment %}
+  Week header and chore list (#10). Rendered inside dashboard.html, and on its
+  own for HTMX week navigation, which swaps the whole #dashboard-list.
+  Without JavaScript the hrefs are plain full-page links.
+{% endcomment %}
+{% url 'dashboard' as dashboard_url %}
+<div id="dashboard-list">
+  <nav class="week-nav" aria-label="Week">
+    <ul>
+      <li>
+        {% if nav.previous %}
+          <a href="{{ dashboard_url }}?week={{ nav.previous }}" aria-label="Previous week"
+             hx-get="{{ dashboard_url }}?week={{ nav.previous }}"
+             hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">‹</a>
+        {% endif %}
+      </li>
+    </ul>
+    <ul><li><h1 id="week-title">{{ nav.title }}</h1></li></ul>
+    <ul>
+      <li>
+        {% if nav.next %}
+          <a href="{{ dashboard_url }}?week={{ nav.next }}" aria-label="Next week"
+             hx-get="{{ dashboard_url }}?week={{ nav.next }}"
+             hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">›</a>
+        {% endif %}
+      </li>
+    </ul>
+  </nav>
+  {% if not nav.is_current %}
+    <p><a id="this-week" href="{{ dashboard_url }}"
+          hx-get="{{ dashboard_url }}"
+          hx-target="#dashboard-list" hx-swap="outerHTML" hx-push-url="true">This week</a></p>
+  {% endif %}
+
+  {% if is_empty %}
+    <section id="no-chores">
+      <p>No chores this week</p>
+      <p><a href="{% url 'chore_create' %}">Add a chore</a></p>
+    </section>
+  {% elif nav.is_current %}
+    {% for key, heading, cards in sections %}
+      <section id="section-{{ key }}">
+        <h2>{{ heading }}</h2>
+        {% for card in cards %}
+          {% include "chores/_chore_card.html" %}
+        {% empty %}
+          <p class="nothing-here">Nothing here</p>
+        {% endfor %}
+      </section>
+    {% endfor %}
+    {% if done_earlier %}
+      <section id="section-done-earlier">
+        <h2>Done earlier this week</h2>
+        {% for card in done_earlier %}
+          {% include "chores/_chore_card.html" %}
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% else %}
+    <section id="section-week">
+      {% for card in cards %}
+        {% include "chores/_chore_card.html" %}
+      {% endfor %}
+    </section>
+  {% endif %}
+</div>

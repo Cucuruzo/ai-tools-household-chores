@@ -1,18 +1,122 @@
 from django.contrib import messages
 from django.db import transaction
+from django.db.models import Q
 from django.db.models.functions import Lower
-from django.http import Http404, HttpResponse, HttpResponseBadRequest
+from django.http import Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.cache import patch_vary_headers
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from . import dashboard as dash
 from .forms import ChoreForm, MemberForm, find_template
-from .models import Chore, Member
+from .models import Chore, ChoreOccurrence, Member
 from .profile import is_valid_pk, set_active_member
+from .services import eligible_pool, materialize_week, project_occurrences
 
 
+@require_GET
 def home(request):
-    return HttpResponse("Household Chore Manager")
+    return redirect("dashboard")
+
+
+# --- Dashboard (#10) -----------------------------------------------------------
+
+
+class _PoolCache:
+    """Whether each chore's eligible pool is empty now, one query per chore."""
+
+    def __init__(self):
+        self._empty = {}
+
+    def empty(self, chore):
+        if chore.pk not in self._empty:
+            self._empty[chore.pk] = not eligible_pool(chore)
+        return self._empty[chore.pk]
+
+
+def _note(pools, chore, mode, member, is_override):
+    has_member = member is not None
+    pool_empty = mode == Chore.AssignmentMode.ROTATING and not has_member and pools.empty(chore)
+    return dash.assignee_note(mode, has_member, is_override, pool_empty)
+
+
+def _stored_cards(occurrences, pools):
+    cards = []
+    for occ in occurrences.select_related("chore", "member"):
+        cards.append(dash.Card(
+            pk=occ.pk, chore_id=occ.chore_id, title=occ.chore.title, date=occ.date,
+            due_time=occ.due_time, points=occ.points, status=occ.status, member=occ.member,
+            assignee_note=_note(pools, occ.chore, occ.chore.assignment_mode, occ.member, occ.is_override),
+        ))
+    return cards
+
+
+def _projected_cards(projected, pools):
+    chores = Chore.objects.in_bulk({p["chore_id"] for p in projected})
+    members = Member.objects.in_bulk({p["member_id"] for p in projected if p["member_id"]})
+    cards = []
+    for p in projected:
+        member = members.get(p["member_id"])
+        cards.append(dash.Card(
+            pk=None, chore_id=p["chore_id"], title=p["title"], date=p["date"],
+            due_time=p["due_time"], points=p["points"], status=dash.PLANNED, member=member,
+            assignee_note=_note(pools, chores[p["chore_id"]], p["assignment_mode"], member, False),
+        ))
+    return cards
+
+
+def _shown_occurrences():
+    # Templates never get rows (#9); the filter keeps it that way on screen too.
+    return ChoreOccurrence.objects.filter(chore__is_template=False)
+
+
+def _dashboard_context(monday, today, now):
+    nav = dash.week_nav(monday, today)
+    pools = _PoolCache()
+    week = Q(date__gte=nav["monday"], date__lte=nav["sunday"])
+    context = {"nav": nav}
+    if nav["is_current"]:
+        # Same ``today`` for the Monday and the call, so this never raises.
+        materialize_week(nav["monday"], today=today)
+        rows = _shown_occurrences().filter(
+            week | Q(status=ChoreOccurrence.Status.TODO, date__lt=nav["monday"])
+        )
+        sections = dash.group_current_week(_stored_cards(rows, pools), today, now)
+        context["sections"] = [
+            ("overdue", "Overdue", sections["overdue"]),
+            ("today", "Today", sections["today"]),
+            ("upcoming", "Upcoming", sections["upcoming"]),
+        ]
+        context["done_earlier"] = sections["done_earlier"]
+        context["is_empty"] = not any(sections.values())
+    else:
+        cards = _stored_cards(_shown_occurrences().filter(week), pools)
+        if nav["is_past"]:
+            dash.mark_past_overdue(cards)
+        else:
+            projected = project_occurrences(nav["monday"], nav["sunday"], today=today)
+            cards += _projected_cards(projected, pools)
+        context["cards"] = sorted(cards, key=dash.list_key)
+        context["is_empty"] = not cards
+    return context
+
+
+@require_GET
+def dashboard(request):
+    # One clock read: "now" and "today" are the same instant in the viewer's
+    # zone (#26); timezone.localdate(now) is timezone.localdate() for it.
+    now = timezone.localtime()
+    today = timezone.localdate(now)
+    monday = dash.parse_week(request.GET.get("week")) or dash.monday_of(today)
+    context = _dashboard_context(monday, today, now)
+    partial = _is_htmx(request) and request.headers.get("HX-History-Restore-Request") != "true"
+    template = "chores/_dashboard_list.html" if partial else "chores/dashboard.html"
+    response = render(request, template, context)
+    # The same URL serves a partial or a full page; keep browser caches apart.
+    patch_vary_headers(response, ["HX-Request", "HX-History-Restore-Request"])
+    return response
 
 
 def _member_form(member=None, data=None):

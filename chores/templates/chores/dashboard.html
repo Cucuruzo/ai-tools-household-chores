@@ -1,0 +1,16 @@
+{% extends "chores/base.html" %}
+
+{% block title %}Dashboard · Household Chores{% endblock %}
+
+{% block head %}
+<style>
+  #dashboard-list .week-nav h1 { margin: 0; font-size: 1.25rem; }
+  #dashboard-list .week-nav a { text-decoration: none; font-size: 1.5rem; }
+  .chore-card { margin-bottom: 0.75rem; }
+  .chore-card p { margin: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "chores/_dashboard_list.html" %}
+{% endblock %}
