@@ -3,13 +3,22 @@ from .models import Member
 SESSION_KEY = "active_member_id"
 
 
+# Primary keys are signed 64-bit; larger ints make the DB driver raise OverflowError.
+MAX_PK = 2**63 - 1
+
+
+def is_valid_pk(pk):
+    return type(pk) is int and 1 <= pk <= MAX_PK
+
+
 def _parse_pk(raw):
-    """Accept only genuine ints or strings of ASCII digits; reject bools, floats, None etc."""
-    if type(raw) is int:
-        return raw
+    """Accept only genuine ints or strings of ASCII digits within 1..MAX_PK.
+
+    Bools, floats, None, out-of-range values and anything else are rejected.
+    """
     if isinstance(raw, str) and raw.isascii() and raw.isdigit():
-        return int(raw)
-    return None
+        raw = int(raw)
+    return raw if is_valid_pk(raw) else None
 
 
 def get_active_member(request):

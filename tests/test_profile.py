@@ -179,6 +179,24 @@ def test_get_is_405_and_session_unchanged(client):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("pk", [2**63, 10**30])
+def test_huge_id_is_404_and_session_unchanged(client, pk):
+    ann = make("Ann")
+    set_session(client, ann.pk)
+    response = client.post(f"/profile/{pk}/", {"next": FAMILY})
+    assert response.status_code == 404
+    assert client.session["active_member_id"] == ann.pk
+
+
+@pytest.mark.django_db
+def test_max_pk_is_still_a_valid_lookup(client):
+    make("Ann")
+    set_session(client, 2**63 - 1)
+    assert client.get(FAMILY).status_code == 200
+    assert "active_member_id" not in client.session
+
+
+@pytest.mark.django_db
 def test_non_numeric_id_is_404(client):
     assert client.post("/profile/abc/").status_code == 404
 
@@ -210,7 +228,12 @@ def test_deleted_last_member_shows_add_your_family(client):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("value", ["abc", "", 1.5, True, None], ids=["str", "empty", "float", "bool", "none"])
+@pytest.mark.parametrize(
+    "value",
+    ["abc", "", 1.5, True, None, 0, -1, 2**63, 10**30, "1" + "0" * 30],
+    ids=["str", "empty", "float", "bool", "none", "zero", "negative",
+         "2**63", "10**30", "huge-digit-string"],
+)
 def test_non_integer_session_value_is_treated_as_stale(client, value):
     # pk=1 so that int(1.5) / int(True) would hit a real member if coerced.
     Member.objects.create(pk=1, name="Ann", role="adult", avatar="😀")
@@ -246,7 +269,7 @@ def test_get_active_member_helper(rf):
     request.session["active_member_id"] = 999
     assert get_active_member(request) is None
     assert "active_member_id" not in request.session
-    for bad in (1.5, True, None):
+    for bad in (1.5, True, None, 0, -1, 2**63, "1" + "0" * 30):
         request.session["active_member_id"] = bad
         assert get_active_member(request) is None
         assert "active_member_id" not in request.session
